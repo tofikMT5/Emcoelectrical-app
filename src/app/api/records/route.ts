@@ -1,5 +1,5 @@
 import { coerceRecordInput, validateRecord } from "@/lib/winding";
-import { findRecords, insertRecord } from "@/db";
+import { emptyRecycleBin, findRecords, insertRecord } from "@/db";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -12,8 +12,9 @@ export async function GET(request: Request) {
   const rpm = searchParams.get("rpm") ?? "";
   const q = searchParams.get("q") ?? "";
   const companyName = searchParams.get("companyName") ?? searchParams.get("company") ?? "";
+  const recycle = searchParams.get("recycle") === "true";
 
-  const records = await findRecords({ frameSize, hp, phase, rpm, q, companyName });
+  const records = await findRecords({ frameSize, hp, phase, rpm, q, companyName, recycle });
   return Response.json({ records });
 }
 
@@ -30,4 +31,13 @@ export async function POST(request: Request) {
   } catch {
     return Response.json({ message: "Could not save this record. Please try again." }, { status: 400 });
   }
+}
+
+export async function DELETE(request: Request) {
+  const { searchParams } = new URL(request.url);
+  if (searchParams.get("emptyRecycle") === "true") {
+    const cleared = await emptyRecycleBin();
+    return Response.json({ ok: true, cleared });
+  }
+  return Response.json({ message: "Invalid request" }, { status: 400 });
 }

@@ -1,6 +1,7 @@
 "use client";
 
 import { ChangeEvent, FormEvent, ReactNode, useCallback, useEffect, useMemo, useState } from "react";
+import Image from "next/image";
 import {
   emptyRecord,
   FRAME_SIZES,
@@ -15,6 +16,7 @@ import {
   DIMENSION_VALUES,
   WEIGHT_VALUES,
   displayPhase,
+  isThreePhase,
   normalizeNumber,
   normalizePhase,
   type RecordField,
@@ -23,7 +25,7 @@ import {
   type WindingRecord,
 } from "@/lib/winding";
 
-type View = "search" | "add" | "saved" | "settings" | "details";
+type View = "search" | "add" | "saved" | "recycle" | "settings" | "details";
 type FilterState = { q: string; frameSize: string; hp: string; phase: string; rpm: string };
 type Notice = { type: "success" | "error"; text: string } | null;
 type IconName = "search" | "plus" | "archive" | "settings" | "arrow" | "edit" | "trash" | "print" | "download" | "upload" | "close" | "sliders" | "check" | "database" | "share";
@@ -34,6 +36,7 @@ const navItems: { id: Exclude<View, "details">; label: string; icon: IconName }[
   { id: "search", label: "Search records", icon: "search" },
   { id: "add", label: "Add new record", icon: "plus" },
   { id: "saved", label: "Saved records", icon: "archive" },
+  { id: "recycle", label: "Recycle bin", icon: "trash" },
   { id: "settings", label: "Settings & backup", icon: "settings" },
 ];
 const SHARE_NUMBER = "919824129886";
@@ -113,8 +116,32 @@ function parseCsv(text: string): Record<string, string>[] {
 }
 
 function buildShareMessage(record: WindingRecord) {
+  const threePhase = isThreePhase(record.phase);
+  if (threePhase) {
+    return [
+      `Company Name: ${record.companyName}`,
+      ...(record.description ? [`Description: ${record.description}`] : []),
+      `Frame Size: ${record.frameSize}`,
+      `HP: ${record.hp}`,
+      `Phase: ${displayPhase(record.phase)}`,
+      `RPM: ${record.rpm}`,
+      `OD: ${record.od || "-"}`,
+      `ID: ${record.idDimension || "-"}`,
+      `E Length: ${record.eLength || "-"}`,
+      `Slot: ${record.slot || "-"}`,
+      `R. Slot: ${record.rSlot || "-"}`,
+      "",
+      "Coil Data:",
+      `Pitch: ${record.runningPitch || "-"}`,
+      `Turns: ${record.runningTurns || "-"}`,
+      `SWG: ${record.runningSwg || "-"}`,
+      `Weight: ${record.runningWeight || "-"}`,
+      `Connection: ${record.runningConnection || "-"}`,
+    ].join("\n");
+  }
+
   return [
-    `Machine: ${record.companyName}`,
+    `Company Name: ${record.companyName}`,
     ...(record.description ? [`Description: ${record.description}`] : []),
     `Frame Size: ${record.frameSize}`,
     `HP: ${record.hp}`,
@@ -125,16 +152,22 @@ function buildShareMessage(record: WindingRecord) {
     `E Length: ${record.eLength || "-"}`,
     `Slot: ${record.slot || "-"}`,
     `R. Slot: ${record.rSlot || "-"}`,
-    `Running Coil Pitch: ${record.runningPitch || "-"}`,
-    `Running Coil Turns: ${record.runningTurns || "-"}`,
-    `Running Coil SWG: ${record.runningSwg || "-"}`,
-    `Running Coil Weight: ${record.runningWeight || "-"}`,
-    `Running Coil Connection: ${record.runningConnection || "-"}`,
-    `Starting Coil Pitch: ${record.startingPitch || "-"}`,
-    `Starting Coil Turns: ${record.startingTurns || "-"}`,
-    `Starting Coil SWG: ${record.startingSwg || "-"}`,
-    `Starting Coil Weight: ${record.startingWeight || "-"}`,
-    `Starting Coil Connection: ${record.startingConnection || "-"}`,
+    "",
+    "Running Coil:",
+    `Pitch: ${record.runningPitch || "-"}`,
+    `Turns: ${record.runningTurns || "-"}`,
+    `SWG: ${record.runningSwg || "-"}`,
+    `Weight: ${record.runningWeight || "-"}`,
+    `Connection: ${record.runningConnection || "-"}`,
+    "",
+    "Starting Coil:",
+    `Pitch: ${record.startingPitch || "-"}`,
+    `Turns: ${record.startingTurns || "-"}`,
+    `SWG: ${record.startingSwg || "-"}`,
+    `Weight: ${record.startingWeight || "-"}`,
+    `Connection: ${record.startingConnection || "-"}`,
+    "",
+    "Capacitors:",
     `Starting Capacitor: ${record.startingCapacitor || "-"}`,
     `Running Capacitor: ${record.runningCapacitor || "-"}`,
   ].join("\n");
@@ -165,6 +198,24 @@ export default function WindingLibrary() {
   const [importMode, setImportMode] = useState<"append" | "replace">("append");
   const [importing, setImporting] = useState(false);
 
+  const [recycleRecords, setRecycleRecords] = useState<WindingRecord[]>([]);
+  const [recycleLoading, setRecycleLoading] = useState(false);
+
+  const loadRecycleRecords = useCallback(async () => {
+    setRecycleLoading(true);
+    try {
+      const response = await fetch("/api/records?recycle=true", { cache: "no-store" });
+      const data = await response.json();
+      if (response.ok) {
+        setRecycleRecords(data.records as WindingRecord[]);
+      }
+    } catch {
+      // ignore
+    } finally {
+      setRecycleLoading(false);
+    }
+  }, []);
+
   const loadRecords = useCallback(async (activeFilters: FilterState = blankFilters()) => {
     setLoading(true);
     try {
@@ -182,7 +233,11 @@ export default function WindingLibrary() {
   useEffect(() => {
     const initialise = async () => {
       try {
-        const [settingsResponse] = await Promise.all([fetch("/api/settings", { cache: "no-store" }), loadRecords()]);
+        const [settingsResponse] = await Promise.all([
+          fetch("/api/settings", { cache: "no-store" }),
+          loadRecords(),
+          loadRecycleRecords(),
+        ]);
         const settingsData = await settingsResponse.json();
         if (settingsResponse.ok && settingsData.settings) {
           setSettings(settingsData.settings); setSettingsDraft(settingsData.settings);
@@ -190,7 +245,7 @@ export default function WindingLibrary() {
       } catch { setNotice({ type: "error", text: "Could not connect to the workshop library." }); }
     };
     void initialise();
-  }, [loadRecords]);
+  }, [loadRecords, loadRecycleRecords]);
 
   const isDirty = useMemo(() => (view === "add" && JSON.stringify(form) !== JSON.stringify(formStart)), [view, form, formStart]);
   useEffect(() => {
@@ -224,26 +279,87 @@ export default function WindingLibrary() {
 
   const saveRecord = async (event?: FormEvent<HTMLFormElement>, addAnother = false) => {
     event?.preventDefault(); setSaving(true); setFormErrors({});
+    const payload = isThreePhase(form.phase)
+      ? {
+          ...form,
+          startingPitch: "",
+          startingTurns: "",
+          startingSwg: "",
+          startingWeight: "",
+          startingConnection: "",
+          startingCapacitor: "",
+          runningCapacitor: "",
+        }
+      : form;
     try {
-      const response = await fetch(editingId ? `/api/records/${editingId}` : "/api/records", { method: editingId ? "PATCH" : "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(form) });
+      const response = await fetch(editingId ? `/api/records/${editingId}` : "/api/records", { method: editingId ? "PATCH" : "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
       const data = await response.json();
       if (response.status === 422 && data.errors) { setFormErrors(data.errors); setNotice({ type: "error", text: "Please fill in the required motor information." }); return; }
       if (!response.ok) throw new Error(data.message || "Could not save this record.");
       setNotice({ type: "success", text: editingId ? "Record updated." : "Record saved to the library." });
       await loadRecords(filters);
       if (addAnother) { const blank = emptyRecord(); setForm(blank); setFormStart(blank); setEditingId(null); }
-      else { setFormStart(form); setSelected(data.record as WindingRecord); setView("details"); }
+      else { setFormStart(payload); setSelected(data.record as WindingRecord); setView("details"); }
     } catch (error) { setNotice({ type: "error", text: error instanceof Error ? error.message : "Could not save this record." }); }
     finally { setSaving(false); }
   };
 
   const deleteRecord = async (record: WindingRecord) => {
-    if (!window.confirm(`Delete “${record.companyName}”? This cannot be undone.`)) return;
+    if (!window.confirm(`Move “${record.companyName}” to Recycle bin? You can restore it anytime.`)) return;
     try {
       const response = await fetch(`/api/records/${record.id}`, { method: "DELETE" });
-      const data = await response.json(); if (!response.ok) throw new Error(data.message || "Could not delete this record.");
-      setNotice({ type: "success", text: "Record deleted." }); setSelected(null); setView("search"); await loadRecords(filters);
-    } catch (error) { setNotice({ type: "error", text: error instanceof Error ? error.message : "Could not delete record." }); }
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.message || "Could not move to Recycle bin.");
+      setNotice({ type: "success", text: `“${record.companyName}” moved to Recycle bin.` });
+      setSelected(null);
+      if (view === "details") setView(returnView || "saved");
+      await Promise.all([loadRecords(filters), loadRecycleRecords()]);
+    } catch (error) {
+      setNotice({ type: "error", text: error instanceof Error ? error.message : "Could not delete record." });
+    }
+  };
+
+  const restoreRecord = async (record: WindingRecord) => {
+    try {
+      const response = await fetch(`/api/records/${record.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ restore: true }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.message || "Could not restore record.");
+      setNotice({ type: "success", text: `“${record.companyName}” restored to library.` });
+      await Promise.all([loadRecords(filters), loadRecycleRecords()]);
+    } catch (error) {
+      setNotice({ type: "error", text: error instanceof Error ? error.message : "Could not restore record." });
+    }
+  };
+
+  const permanentDeleteRecord = async (record: WindingRecord) => {
+    if (!window.confirm(`Permanently delete “${record.companyName}”? This cannot be undone.`)) return;
+    try {
+      const response = await fetch(`/api/records/${record.id}?permanent=true`, { method: "DELETE" });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.message || "Could not permanently delete record.");
+      setNotice({ type: "success", text: "Record permanently deleted." });
+      await loadRecycleRecords();
+    } catch (error) {
+      setNotice({ type: "error", text: error instanceof Error ? error.message : "Could not delete record." });
+    }
+  };
+
+  const clearRecycleBin = async () => {
+    if (!recycleRecords.length) return;
+    if (!window.confirm(`Permanently delete all ${recycleRecords.length} records in Recycle bin? This cannot be undone.`)) return;
+    try {
+      const response = await fetch("/api/records?emptyRecycle=true", { method: "DELETE" });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.message || "Could not empty recycle bin.");
+      setNotice({ type: "success", text: `Recycle bin emptied (${data.cleared || recycleRecords.length} records removed).` });
+      await loadRecycleRecords();
+    } catch (error) {
+      setNotice({ type: "error", text: error instanceof Error ? error.message : "Could not empty recycle bin." });
+    }
   };
 
   const performSearch = async (event?: FormEvent) => { event?.preventDefault(); const next = { ...draftFilters }; setFilters(next); await loadRecords(next); };
@@ -313,17 +429,18 @@ export default function WindingLibrary() {
   const filterActive = Object.values(filters).some((value) => value.trim());
 
   return <div className="app-shell">
-    <aside className="sidebar no-print"><div className="brand-mark"><span className="coil-mark">MW</span><div><strong>{settings.appName}</strong><small>{settings.workshopName}</small></div></div><nav className="side-nav" aria-label="Main navigation">{navItems.map((item) => <button key={item.id} className={view === item.id || (view === "details" && item.id === "saved") ? "nav-link active" : "nav-link"} onClick={() => item.id === "add" ? openCreate() : navigate(item.id)}><Icon name={item.icon} size={19} /><span>{item.label}</span></button>)}</nav><div className="sidebar-note"><Icon name="database" size={20} /><p><strong>Workshop-ready records</strong><span>Stored securely in your library database.</span></p></div></aside>
+    <aside className="sidebar no-print"><div className="brand-mark"><Image src="/logo.png" alt="EMCO Electrical Logo" width={42} height={42} className="brand-logo-img" priority /><div><strong>{settings.appName}</strong><small>{settings.workshopName}</small></div></div><nav className="side-nav" aria-label="Main navigation">{navItems.map((item) => <button key={item.id} className={view === item.id || (view === "details" && item.id === "saved") ? "nav-link active" : "nav-link"} onClick={() => item.id === "add" ? openCreate() : navigate(item.id)}><Icon name={item.icon} size={19} /><span>{item.label}</span>{item.id === "recycle" && recycleRecords.length > 0 ? <span className="nav-count-badge">{recycleRecords.length}</span> : null}</button>)}</nav><div className="sidebar-note"><Icon name="database" size={20} /><p><strong>Workshop-ready records</strong><span>Stored securely in your library database.</span></p></div></aside>
     <main className="main-content">
-      <header className="topbar no-print"><div className="mobile-brand"><span className="coil-mark">MW</span><div><strong>{settings.appName}</strong><small>{settings.workshopName}</small></div></div><div className="topbar-actions"><span className="record-total"><b>{records.length}</b> record{records.length === 1 ? "" : "s"}</span><Button onClick={openCreate}><Icon name="plus" size={18} /> <span>Add record</span></Button></div></header>
+      <header className="topbar no-print"><div className="mobile-brand"><Image src="/logo.png" alt="EMCO Electrical Logo" width={36} height={36} className="brand-logo-img" priority /><div><strong>{settings.appName}</strong><small>{settings.workshopName}</small></div></div><div className="topbar-actions"><span className="record-total"><b>{records.length}</b> record{records.length === 1 ? "" : "s"}</span><Button onClick={openCreate}><Icon name="plus" size={18} /> <span>Add record</span></Button></div></header>
       {notice ? <div className={`notice ${notice.type}`} role="status"><Icon name={notice.type === "success" ? "check" : "close"} size={18} /><span>{notice.text}</span><button aria-label="Dismiss message" onClick={() => setNotice(null)}><Icon name="close" size={16} /></button></div> : null}
       {view === "search" ? <SearchScreen filters={draftFilters} setFilters={setDraftFilters} onSearch={performSearch} onClear={clearFilters} loading={loading} records={records} filterActive={filterActive} onView={(rec) => showDetails(rec, "search")} onEdit={(rec) => startEdit(rec, "search")} onDelete={deleteRecord} onAdd={openCreate} onShare={shareRecord} /> : null}
       {view === "saved" ? <SavedScreen records={savedRecords} query={savedQuery} setQuery={setSavedQuery} loading={loading} onView={(rec) => showDetails(rec, "saved")} onEdit={(rec) => startEdit(rec, "saved")} onDelete={deleteRecord} onAdd={openCreate} onShare={shareRecord} /> : null}
       {view === "add" ? <RecordForm form={form} errors={formErrors} editing={Boolean(editingId)} saving={saving} onChange={changeForm} onSubmit={saveRecord} onCancel={() => navigate(editingId ? (returnView || "saved") : "search")} /> : null}
       {view === "details" && selected ? <DetailsScreen record={selected} onBack={() => navigate(returnView || "search")} onEdit={() => startEdit(selected, returnView)} onDelete={() => deleteRecord(selected)} onShare={() => shareRecord(selected)} /> : null}
+      {view === "recycle" ? <RecycleScreen records={recycleRecords} loading={recycleLoading} onRestore={restoreRecord} onPermanentDelete={permanentDeleteRecord} onEmpty={clearRecycleBin} /> : null}
       {view === "settings" ? <SettingsScreen settings={settingsDraft} setSettings={setSettingsDraft} onSave={saveSettings} onExport={exportRecords} importMode={importMode} setImportMode={setImportMode} onImport={importFile} importing={importing} /> : null}
     </main>
-    <nav className="mobile-nav no-print" aria-label="Mobile navigation">{navItems.map((item) => <button key={item.id} className={view === item.id ? "active" : ""} onClick={() => item.id === "add" ? openCreate() : navigate(item.id)}><Icon name={item.icon} size={19} /><span>{item.id === "settings" ? "Settings" : item.id === "search" ? "Search" : item.id === "saved" ? "Saved" : "Add"}</span></button>)}</nav>
+    <nav className="mobile-nav no-print" aria-label="Mobile navigation">{navItems.map((item) => <button key={item.id} className={view === item.id ? "active" : ""} onClick={() => item.id === "add" ? openCreate() : navigate(item.id)}><Icon name={item.icon} size={19} /><span>{item.id === "settings" ? "Settings" : item.id === "search" ? "Search" : item.id === "saved" ? "Saved" : item.id === "recycle" ? "Recycle" : "Add"}</span></button>)}</nav>
   </div>;
 }
 
@@ -350,25 +467,139 @@ function SavedScreen({ records, query, setQuery, loading, onView, onEdit, onDele
 
 function RecordForm({ form, errors, editing, saving, onChange, onSubmit, onCancel }: { form: RecordInput; errors: Partial<Record<RecordField, string>>; editing: boolean; saving: boolean; onChange: (name: RecordField, value: string) => void; onSubmit: (event?: FormEvent<HTMLFormElement>, addAnother?: boolean) => Promise<void>; onCancel: () => void; }) {
   const submitAnother = () => void onSubmit(undefined, true);
+  const threePhase = isThreePhase(form.phase);
   return <><section className="page-intro compact no-print"><div><p className="eyebrow">{editing ? "Edit record" : "New record"}</p><h1>{editing ? "Update winding data." : "Add a winding record."}</h1><p>Fields marked <b>Required</b> identify the motor in search. All other workshop measurements are optional.</p></div></section><form className="record-form" onSubmit={(event) => void onSubmit(event)} noValidate>
     <Section title="Motor information" note="Used to find this record later."><div className="field-grid motor-grid"><Field label="Company / Machine Name" name="companyName" value={form.companyName} onChange={onChange} error={errors.companyName} required list="form-company-options" placeholder="e.g. Emco Electrical — Pump Motor" className="wide" /><Field label="Description" name="description" value={form.description} onChange={onChange} placeholder="e.g. Submersible pump, single phase, 24 slots, aluminium body note" className="wide" /><Field label="Frame Size" name="frameSize" value={form.frameSize} onChange={onChange} error={errors.frameSize} required list="form-frame-options" inputMode="numeric" placeholder="e.g. 90" /><Field label="HP" name="hp" value={form.hp} onChange={onChange} error={errors.hp} required list="form-hp-options" inputMode="decimal" placeholder="e.g. 0.5" /><Field label="Phase" name="phase" value={form.phase} onChange={onChange} error={errors.phase} required list="form-phase-options" inputMode="numeric" placeholder="1 or 3" /><Field label="RPM" name="rpm" value={form.rpm} onChange={onChange} error={errors.rpm} required list="form-rpm-options" inputMode="numeric" placeholder="e.g. 1440" /></div></Section>
     <datalist id="form-company-options"><option value="EMCO ELECTRICAL" /></datalist><datalist id="form-frame-options">{FRAME_SIZES.map((value) => <option key={value} value={value} />)}</datalist><datalist id="form-hp-options">{HP_VALUES.map((value) => <option key={value} value={value} />)}</datalist><datalist id="form-phase-options">{PHASE_VALUES.map((value) => <option key={value} value={value} label={`${value} phase`} />)}</datalist><datalist id="form-rpm-options">{RPM_VALUES.map((value) => <option key={value} value={value} />)}</datalist>
     <Section title="Dimensions & slots" note="Use the same notation you use at the bench."><div className="field-grid five-grid"><Field label="OD" name="od" value={form.od} onChange={onChange} list="dimension-options" placeholder="e.g. 126 mm" /><Field label="ID" name="idDimension" value={form.idDimension} onChange={onChange} list="dimension-options" placeholder="e.g. 72 mm" /><Field label="E Length" name="eLength" value={form.eLength} onChange={onChange} list="dimension-options" placeholder="e.g. 80 mm" /><Field label="Slot" name="slot" value={form.slot} onChange={onChange} list="slot-options" placeholder="e.g. 24" inputMode="numeric" /><Field label="R. Slot" name="rSlot" value={form.rSlot} onChange={onChange} list="slot-options" placeholder="e.g. 2.5" /></div></Section>
     <datalist id="dimension-options">{DIMENSION_VALUES.map((value) => <option key={value} value={value} />)}</datalist><datalist id="slot-options">{SLOT_VALUES.map((value) => <option key={value} value={value} />)}</datalist>
-    <div className="coil-columns"><Section title="Running coil" note="Main/run winding values."><div className="field-grid two-grid"><Field label="Pitch" name="runningPitch" value={form.runningPitch} onChange={onChange} list="pitch-options" placeholder="e.g. 1–7" /><Field label="Turns" name="runningTurns" value={form.runningTurns} onChange={onChange} list="turn-options" placeholder="e.g. 120" /><Field label="SWG" name="runningSwg" value={form.runningSwg} onChange={onChange} list="swg-options" placeholder="e.g. 22" /><Field label="Weight" name="runningWeight" value={form.runningWeight} onChange={onChange} list="weight-options" placeholder="e.g. 0.85 kg" /><Field label="Connection" name="runningConnection" value={form.runningConnection} onChange={onChange} list="connection-options" placeholder="e.g. Series" className="wide-mobile" /></div></Section><Section title="Starting coil" note="Start/auxiliary winding values."><div className="field-grid two-grid"><Field label="Pitch" name="startingPitch" value={form.startingPitch} onChange={onChange} list="pitch-options" placeholder="e.g. 1–6" /><Field label="Turns" name="startingTurns" value={form.startingTurns} onChange={onChange} list="turn-options" placeholder="e.g. 160" /><Field label="SWG" name="startingSwg" value={form.startingSwg} onChange={onChange} list="swg-options" placeholder="e.g. 24" /><Field label="Weight" name="startingWeight" value={form.startingWeight} onChange={onChange} list="weight-options" placeholder="e.g. 0.55 kg" /><Field label="Connection" name="startingConnection" value={form.startingConnection} onChange={onChange} list="connection-options" placeholder="e.g. Parallel" className="wide-mobile" /></div></Section></div>
+    <div className={threePhase ? "coil-columns single-column" : "coil-columns"}>
+      <Section title={threePhase ? "Coil data" : "Running coil"} note={threePhase ? "3-phase winding values." : "Main/run winding values."}>
+        <div className={`field-grid ${threePhase ? "five-grid" : "two-grid"}`}>
+          <Field label="Pitch" name="runningPitch" value={form.runningPitch} onChange={onChange} list="pitch-options" placeholder="e.g. 1–7" />
+          <Field label="Turns" name="runningTurns" value={form.runningTurns} onChange={onChange} list="turn-options" placeholder="e.g. 120" />
+          <Field label="SWG" name="runningSwg" value={form.runningSwg} onChange={onChange} list="swg-options" placeholder="e.g. 22" />
+          <Field label="Weight" name="runningWeight" value={form.runningWeight} onChange={onChange} list="weight-options" placeholder="e.g. 0.85 kg" />
+          <Field label="Connection" name="runningConnection" value={form.runningConnection} onChange={onChange} list="connection-options" placeholder="e.g. Series" className={threePhase ? "" : "wide-mobile"} />
+        </div>
+      </Section>
+      {!threePhase ? (
+        <Section title="Starting coil" note="Start/auxiliary winding values.">
+          <div className="field-grid two-grid">
+            <Field label="Pitch" name="startingPitch" value={form.startingPitch} onChange={onChange} list="pitch-options" placeholder="e.g. 1–6" />
+            <Field label="Turns" name="startingTurns" value={form.startingTurns} onChange={onChange} list="turn-options" placeholder="e.g. 160" />
+            <Field label="SWG" name="startingSwg" value={form.startingSwg} onChange={onChange} list="swg-options" placeholder="e.g. 24" />
+            <Field label="Weight" name="startingWeight" value={form.startingWeight} onChange={onChange} list="weight-options" placeholder="e.g. 0.55 kg" />
+            <Field label="Connection" name="startingConnection" value={form.startingConnection} onChange={onChange} list="connection-options" placeholder="e.g. Parallel" className="wide-mobile" />
+          </div>
+        </Section>
+      ) : null}
+    </div>
     <datalist id="pitch-options">{PITCH_VALUES.map((value) => <option key={value} value={value} />)}</datalist><datalist id="turn-options"><option value="80" /><option value="100" /><option value="120" /><option value="140" /><option value="160" /><option value="180" /><option value="200" /></datalist><datalist id="swg-options">{SWG_VALUES.map((value) => <option key={value} value={value} />)}</datalist><datalist id="weight-options">{WEIGHT_VALUES.map((value) => <option key={value} value={value} />)}</datalist><datalist id="connection-options">{CONNECTION_VALUES.map((value) => <option key={value} value={value} />)}</datalist>
-    <Section title="Capacitors" note="Enter the value and units exactly as noted in the workshop."><div className="field-grid two-grid"><Field label="Starting Capacitor" name="startingCapacitor" value={form.startingCapacitor} onChange={onChange} list="capacitor-options" placeholder="e.g. 100 µF / 250 VAC" /><Field label="Running Capacitor" name="runningCapacitor" value={form.runningCapacitor} onChange={onChange} list="capacitor-options" placeholder="e.g. 60 µF / 440 VAC" /></div></Section>
+    {!threePhase ? (
+      <Section title="Capacitors" note="Enter the value and units exactly as noted in the workshop.">
+        <div className="field-grid capacitor-grid">
+          <Field label="Starting Capacitor" name="startingCapacitor" value={form.startingCapacitor} onChange={onChange} list="capacitor-options" placeholder="e.g. 100 µF / 250 VAC" />
+          <Field label="Running Capacitor" name="runningCapacitor" value={form.runningCapacitor} onChange={onChange} list="capacitor-options" placeholder="e.g. 60 µF / 440 VAC" />
+        </div>
+      </Section>
+    ) : null}
     <datalist id="capacitor-options">{CAPACITOR_VALUES.map((value) => <option key={value} value={value} />)}</datalist>
     <div className="form-actions no-print"><Button type="submit" disabled={saving}>{saving ? "Saving…" : editing ? "Save changes" : "Save record"}</Button><Button type="button" variant="secondary" disabled={saving} onClick={submitAnother}>{saving ? "Saving…" : "Save & add another"}</Button><Button type="button" variant="ghost" disabled={saving} onClick={onCancel}>Cancel</Button></div>
   </form></>;
 }
 
 function DetailsScreen({ record, onBack, onEdit, onDelete, onShare }: { record: WindingRecord; onBack: () => void; onEdit: () => void; onDelete: () => void; onShare: () => void; }) {
-  return <article className="detail-page"><div className="detail-toolbar no-print"><Button variant="ghost" onClick={onBack}>← Back to records</Button><div><Button variant="secondary" onClick={onShare}><Icon name="share" size={17} /> Share</Button><Button variant="secondary" onClick={() => window.print()}><Icon name="print" size={17} /> Print</Button><Button onClick={onEdit}><Icon name="edit" size={17} /> Edit</Button><Button variant="danger" onClick={onDelete}><Icon name="trash" size={17} /> Delete</Button></div></div><header className="detail-head"><div><p className="eyebrow">Motor winding record</p><h1>{record.companyName}</h1><p>Last updated {formatDate(record.updatedAt)}</p></div><span className="frame-badge large">Frame {record.frameSize}</span></header><div className="detail-summary"><span><b>{record.hp} HP</b></span><span>{displayPhase(record.phase)}</span><span>{record.rpm} RPM</span></div><div className="detail-grid"><DetailSection title="Motor information"><Spec label="Company / Machine" value={record.companyName} /><Spec label="Description" value={record.description} /><Spec label="Frame Size" value={record.frameSize} /><Spec label="HP" value={record.hp} /><Spec label="Phase" value={displayPhase(record.phase)} /><Spec label="RPM" value={record.rpm} /></DetailSection><DetailSection title="Dimensions & slots"><Spec label="OD" value={record.od} /><Spec label="ID" value={record.idDimension} /><Spec label="E Length" value={record.eLength} /><Spec label="Slot" value={record.slot} /><Spec label="R. Slot" value={record.rSlot} /></DetailSection><DetailSection title="Running coil"><Spec label="Pitch" value={record.runningPitch} /><Spec label="Turns" value={record.runningTurns} /><Spec label="SWG" value={record.runningSwg} /><Spec label="Weight" value={record.runningWeight} /><Spec label="Connection" value={record.runningConnection} /></DetailSection><DetailSection title="Starting coil"><Spec label="Pitch" value={record.startingPitch} /><Spec label="Turns" value={record.startingTurns} /><Spec label="SWG" value={record.startingSwg} /><Spec label="Weight" value={record.startingWeight} /><Spec label="Connection" value={record.startingConnection} /></DetailSection><DetailSection title="Capacitors" className="capacitor-section"><Spec label="Starting Capacitor" value={record.startingCapacitor} /><Spec label="Running Capacitor" value={record.runningCapacitor} /></DetailSection></div><footer className="detail-footer">Record created {formatDate(record.createdAt)} <span>•</span> Unique library ID {record.id}</footer></article>;
+  const threePhase = isThreePhase(record.phase);
+  return <article className="detail-page"><div className="detail-toolbar no-print"><Button variant="ghost" onClick={onBack}>← Back to records</Button><div><Button variant="secondary" onClick={onShare}><Icon name="share" size={17} /> Share</Button><Button variant="secondary" onClick={() => window.print()}><Icon name="print" size={17} /> Print / Save as PDF</Button><Button onClick={onEdit}><Icon name="edit" size={17} /> Edit</Button><Button variant="danger" onClick={onDelete}><Icon name="trash" size={17} /> Delete</Button></div></div><header className="detail-head"><div><p className="eyebrow">Motor winding record</p><h1>{record.companyName}</h1><p>Last updated {formatDate(record.updatedAt)}</p></div><span className="frame-badge large">Frame {record.frameSize}</span></header><div className="detail-summary"><span><b>{record.hp} HP</b></span><span>{displayPhase(record.phase)}</span><span>{record.rpm} RPM</span></div><div className={`detail-grid ${threePhase ? "three-phase-grid" : ""}`}><DetailSection title="Motor information"><Spec label="Company Name" value={record.companyName} /><Spec label="Description" value={record.description} /><Spec label="Frame Size" value={record.frameSize} /><Spec label="HP" value={record.hp} /><Spec label="Phase" value={displayPhase(record.phase)} /><Spec label="RPM" value={record.rpm} /></DetailSection><DetailSection title="Dimensions & slots"><Spec label="OD" value={record.od} /><Spec label="ID" value={record.idDimension} /><Spec label="E Length" value={record.eLength} /><Spec label="Slot" value={record.slot} /><Spec label="R. Slot" value={record.rSlot} /></DetailSection><DetailSection title={threePhase ? "Coil data" : "Running coil"} className={threePhase ? "three-phase-coil" : ""}><Spec label="Pitch" value={record.runningPitch} /><Spec label="Turns" value={record.runningTurns} /><Spec label="SWG" value={record.runningSwg} /><Spec label="Weight" value={record.runningWeight} /><Spec label="Connection" value={record.runningConnection} /></DetailSection>{!threePhase ? (<DetailSection title="Starting coil"><Spec label="Pitch" value={record.startingPitch} /><Spec label="Turns" value={record.startingTurns} /><Spec label="SWG" value={record.startingSwg} /><Spec label="Weight" value={record.startingWeight} /><Spec label="Connection" value={record.startingConnection} /></DetailSection>) : null}{!threePhase ? (<DetailSection title="Capacitors" className="capacitor-section"><Spec label="Starting Capacitor" value={record.startingCapacitor} /><Spec label="Running Capacitor" value={record.runningCapacitor} /></DetailSection>) : null}</div><footer className="detail-footer">Record created {formatDate(record.createdAt)} <span>•</span> Unique library ID {record.id}</footer></article>;
 }
 
 function DetailSection({ title, children, className = "" }: { title: string; children: ReactNode; className?: string }) { return <section className={`detail-section ${className}`}><h2>{title}</h2><div>{children}</div></section>; }
 
 function SettingsScreen({ settings, setSettings, onSave, onExport, importMode, setImportMode, onImport, importing }: { settings: Settings; setSettings: (settings: Settings) => void; onSave: (event: FormEvent) => void; onExport: (format: "json" | "csv") => void; importMode: "append" | "replace"; setImportMode: (value: "append" | "replace") => void; onImport: (event: ChangeEvent<HTMLInputElement>) => void; importing: boolean; }) {
   return <><section className="page-intro compact no-print"><div><p className="eyebrow">Settings & data backup</p><h1>Keep the library yours.</h1><p>Set the workshop identity, then export or restore the winding database whenever you need.</p></div></section><div className="settings-layout"><form className="settings-card" onSubmit={onSave}><div className="settings-card-head"><div className="setting-icon"><Icon name="settings" size={21} /></div><div><h2>Workshop identity</h2><p>Shown in the navigation and printed records.</p></div></div><label className="field"><span className="field-label">App name <b>Required</b></span><input className="input" value={settings.appName} maxLength={120} onChange={(event) => setSettings({ ...settings, appName: event.target.value })} placeholder="Motor Winding Library" /></label><label className="field"><span className="field-label">Workshop / company name <b>Required</b></span><input className="input" value={settings.workshopName} maxLength={160} onChange={(event) => setSettings({ ...settings, workshopName: event.target.value })} placeholder="Your workshop name" /></label><Button type="submit">Save settings</Button></form><section className="settings-card"><div className="settings-card-head"><div className="setting-icon"><Icon name="download" size={21} /></div><div><h2>Export backup</h2><p>Download every saved winding record for safekeeping.</p></div></div><div className="backup-buttons"><Button variant="secondary" onClick={() => onExport("json")}><Icon name="download" size={17} /> Export JSON</Button><Button variant="secondary" onClick={() => onExport("csv")}><Icon name="download" size={17} /> Export CSV</Button></div><p className="backup-note">JSON is best for full restore. CSV is useful for sharing or spreadsheet review.</p></section><section className="settings-card import-card"><div className="settings-card-head"><div className="setting-icon"><Icon name="upload" size={21} /></div><div><h2>Restore / import</h2><p>Accepts Motor Winding Library JSON backups or CSV exports.</p></div></div><label className="mode-choice"><input type="radio" checked={importMode === "append"} onChange={() => setImportMode("append")} /><span><b>Add to current library</b><small>Keep existing records and add imported records.</small></span></label><label className="mode-choice warning"><input type="radio" checked={importMode === "replace"} onChange={() => setImportMode("replace")} /><span><b>Replace current library</b><small>Deletes current records after confirmation.</small></span></label><label className={importing ? "file-button disabled" : "file-button"}><Icon name="upload" size={18} /> {importing ? "Importing…" : "Choose backup file"}<input type="file" accept=".json,.csv,application/json,text/csv" disabled={importing} onChange={onImport} /></label></section></div></>;
+}
+
+function RecycleScreen({
+  records,
+  loading,
+  onRestore,
+  onPermanentDelete,
+  onEmpty,
+}: {
+  records: WindingRecord[];
+  loading: boolean;
+  onRestore: (record: WindingRecord) => void;
+  onPermanentDelete: (record: WindingRecord) => void;
+  onEmpty: () => void;
+}) {
+  return (
+    <>
+      <section className="page-intro compact no-print">
+        <div>
+          <p className="eyebrow">Data protection & recovery</p>
+          <h1>Recycle Bin</h1>
+          <p>Deleted records stay here safely. You can restore them back to your workshop library anytime.</p>
+        </div>
+        {records.length > 0 ? (
+          <Button variant="danger" onClick={onEmpty}>
+            <Icon name="trash" size={17} /> Empty recycle bin
+          </Button>
+        ) : null}
+      </section>
+      <section className="results-section">
+        <div className="results-heading">
+          <div>
+            <p className="eyebrow">Recovery</p>
+            <h2>{loading ? "Loading recycle bin…" : `${records.length} deleted record${records.length === 1 ? "" : "s"}`}</h2>
+          </div>
+          <span className="all-records">Safe storage for deleted records</span>
+        </div>
+        {loading ? (
+          <div className="loading-card"><span className="spinner" /> Loading recycle bin…</div>
+        ) : records.length ? (
+          <div className="record-list">
+            {records.map((record) => (
+              <article key={record.id} className="record-card recycle-card">
+                <div className="record-card-top">
+                  <div>
+                    <span className="recycle-badge">In Recycle Bin</span>
+                    <h3 style={{ marginTop: 6 }}>{record.companyName}</h3>
+                  </div>
+                  <span className="frame-badge">Frame {record.frameSize}</span>
+                </div>
+                <div className="metric-row">
+                  <span><b>{record.hp} HP</b></span>
+                  <span>{displayPhase(record.phase)}</span>
+                  <span>{record.rpm} RPM</span>
+                </div>
+                {record.description ? <p className="card-description">{record.description}</p> : null}
+                <div className="record-specs">
+                  <Spec label="OD" value={record.od} />
+                  <Spec label="ID" value={record.idDimension} />
+                  <Spec label="E length" value={record.eLength} />
+                  <Spec label="Slot" value={record.slot} />
+                  <Spec label="R. slot" value={record.rSlot} />
+                </div>
+                <div className="card-actions">
+                  <Button variant="primary" onClick={() => onRestore(record)}>
+                    <Icon name="check" size={17} /> Restore record
+                  </Button>
+                  <button className="icon-text-button danger-text" onClick={() => onPermanentDelete(record)}>
+                    <Icon name="trash" size={17} /> Delete forever
+                  </button>
+                </div>
+              </article>
+            ))}
+          </div>
+        ) : (
+          <div className="empty-state">
+            <div className="empty-icon"><Icon name="trash" size={30} /></div>
+            <h3>Recycle bin is empty</h3>
+            <p>When you delete a motor record, it will safely appear here so you can restore it anytime in the future.</p>
+          </div>
+        )}
+      </section>
+    </>
+  );
 }

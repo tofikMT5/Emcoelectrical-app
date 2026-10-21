@@ -43,6 +43,7 @@ export type WindingRecord = RecordInput & {
   id: string;
   createdAt: string;
   updatedAt: string;
+  deletedAt?: string | null;
 };
 
 export type Settings = {
@@ -89,14 +90,26 @@ export const normalizeNumber = (value: string) => {
 
 export const normalizePhase = (value: string) => {
   const trimmed = normalizeValue(value).toLowerCase();
+  if (trimmed === "three" || trimmed.startsWith("three")) return "3";
+  if (trimmed === "single" || trimmed.startsWith("single") || trimmed.startsWith("one")) return "1";
   const match = trimmed.match(/^[13]\b/) || trimmed.match(/\b([13])\s*(phase)?\b/);
   if (match) return match[1];
   return trimmed;
 };
 
+export const isThreePhase = (phase: string) => {
+  if (!phase) return false;
+  const p = normalizeValue(phase).toLowerCase();
+  if (p === "3" || p === "three") return true;
+  if (p.startsWith("3 ") || p.startsWith("3-") || p.startsWith("3p") || p.startsWith("three")) return true;
+  if (/\b(3|three)(\s*[-/]?\s*phase)?\b/i.test(p)) return true;
+  return normalizePhase(p) === "3";
+};
+
 export const displayPhase = (phase: string) => {
   const trimmed = phase.trim();
-  return trimmed === "1" || trimmed === "3" ? `${trimmed} phase` : trimmed || "—";
+  const normalized = normalizePhase(trimmed);
+  return normalized === "1" || normalized === "3" ? `${normalized} phase` : trimmed || "—";
 };
 
 export const coerceRecordInput = (payload: unknown): RecordInput => {

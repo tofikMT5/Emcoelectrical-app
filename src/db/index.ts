@@ -1,6 +1,6 @@
 import { drizzle } from "drizzle-orm/node-postgres";
 import { Pool } from "pg";
-import { and, desc, eq, ilike, or, sql } from "drizzle-orm";
+import { and, desc, eq, ilike, isNotNull, isNull, or, sql } from "drizzle-orm";
 import { appSettings, windingRecords } from "./schema";
 import {
   normalizeNumber,
@@ -70,6 +70,7 @@ async function ensureTables(): Promise<void> {
           updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
         );
         ALTER TABLE winding_records ADD COLUMN IF NOT EXISTS description TEXT NOT NULL DEFAULT '';
+        ALTER TABLE winding_records ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ DEFAULT NULL;
         CREATE TABLE IF NOT EXISTS app_settings (
           id VARCHAR(32) PRIMARY KEY,
           app_name VARCHAR(120) NOT NULL,
@@ -123,6 +124,7 @@ function serializePgRecord(record: typeof windingRecords.$inferSelect): WindingR
     ...record,
     createdAt: record.createdAt.toISOString(),
     updatedAt: record.updatedAt.toISOString(),
+    deletedAt: record.deletedAt ? record.deletedAt.toISOString() : null,
   };
 }
 
@@ -133,6 +135,7 @@ export type RecordFilterParams = {
   rpm?: string;
   q?: string;
   companyName?: string;
+  recycle?: boolean;
 };
 
 export async function findRecords(filters: RecordFilterParams = {}): Promise<WindingRecord[]> {
@@ -176,6 +179,12 @@ export async function findRecords(filters: RecordFilterParams = {}): Promise<Win
         );
       }
 
+      if (filters.recycle) {
+        conditions.push(isNotNull(windingRecords.deletedAt));
+      } else {
+        conditions.push(isNull(windingRecords.deletedAt));
+      }
+
       const rows = await db
         .select()
         .from(windingRecords)
@@ -189,7 +198,9 @@ export async function findRecords(filters: RecordFilterParams = {}): Promise<Win
   }
 
   const data = await readLocalData();
-  let matches = data.records;
+  let matches = filters.recycle
+    ? data.records.filter((r) => Boolean(r.deletedAt))
+    : data.records.filter((r) => !r.deletedAt);
 
   if (frameSize) {
     matches = matches.filter(
@@ -223,14 +234,17 @@ export async function findRecords(filters: RecordFilterParams = {}): Promise<Win
   );
 }
 
-export async function findRecordById(id: string): Promise<WindingRecord | null> {
+export async function findRecordById(id: string, includeDeleted = false): Promise<WindingRecord | null> {
   if (db) {
     try {
       await ensureTables();
+      const condition = includeDeleted
+        ? eq(windingRecords.id, id)
+        : and(eq(windingRecords.id, id), isNull(windingRecords.deletedAt))!;
       const [record] = await db
         .select()
         .from(windingRecords)
-        .where(eq(windingRecords.id, id));
+        .where(condition);
       if (record) return serializePgRecord(record);
     } catch (err) {
       console.warn("PostgreSQL findById failed, falling back to local storage:", err);
@@ -238,7 +252,9 @@ export async function findRecordById(id: string): Promise<WindingRecord | null> 
   }
 
   const data = await readLocalData();
-  return data.records.find((r) => r.id === id) ?? null;
+  return (
+    data.records.find((r) => r.id === id && (includeDeleted || !r.deletedAt)) ?? null
+  );
 }
 
 export async function insertRecord(input: RecordInput): Promise<WindingRecord> {
@@ -317,7 +333,54 @@ export async function updateRecordById(
   return updated;
 }
 
-export async function deleteRecordById(id: string): Promise<boolean> {
+export async function softDeleteRecordById(id: string): Promise<boolean> {
+  const now = new Date();
+  if (db) {
+    try {
+      await ensureTables();
+      const [record] = await db
+        .update(windingRecords)
+        .set({ deletedAt: now })
+        .where(eq(windingRecords.id, id))
+        .returning({ id: windingRecords.id });
+      if (record) return true;
+    } catch (err) {
+      console.warn("PostgreSQL softDelete failed, falling back to local storage:", err);
+    }
+  }
+
+  const data = await readLocalData();
+  const index = data.records.findIndex((r) => r.id === id);
+  if (index === -1) return false;
+  data.records[index].deletedAt = now.toISOString();
+  await writeLocalData(data);
+  return true;
+}
+
+export async function restoreRecordById(id: string): Promise<boolean> {
+  if (db) {
+    try {
+      await ensureTables();
+      const [record] = await db
+        .update(windingRecords)
+        .set({ deletedAt: null })
+        .where(eq(windingRecords.id, id))
+        .returning({ id: windingRecords.id });
+      if (record) return true;
+    } catch (err) {
+      console.warn("PostgreSQL restore failed, falling back to local storage:", err);
+    }
+  }
+
+  const data = await readLocalData();
+  const index = data.records.findIndex((r) => r.id === id);
+  if (index === -1) return false;
+  data.records[index].deletedAt = null;
+  await writeLocalData(data);
+  return true;
+}
+
+export async function hardDeleteRecordById(id: string): Promise<boolean> {
   if (db) {
     try {
       await ensureTables();
@@ -327,7 +390,7 @@ export async function deleteRecordById(id: string): Promise<boolean> {
         .returning({ id: windingRecords.id });
       if (record) return true;
     } catch (err) {
-      console.warn("PostgreSQL delete failed, falling back to local storage:", err);
+      console.warn("PostgreSQL hardDelete failed, falling back to local storage:", err);
     }
   }
 
@@ -338,6 +401,30 @@ export async function deleteRecordById(id: string): Promise<boolean> {
   await writeLocalData(data);
   return true;
 }
+
+export async function emptyRecycleBin(): Promise<number> {
+  if (db) {
+    try {
+      await ensureTables();
+      const records = await db
+        .delete(windingRecords)
+        .where(isNotNull(windingRecords.deletedAt))
+        .returning({ id: windingRecords.id });
+      return records.length;
+    } catch (err) {
+      console.warn("PostgreSQL emptyRecycleBin failed, falling back to local storage:", err);
+    }
+  }
+
+  const data = await readLocalData();
+  const beforeLength = data.records.length;
+  data.records = data.records.filter((r) => !r.deletedAt);
+  const count = beforeLength - data.records.length;
+  await writeLocalData(data);
+  return count;
+}
+
+export const deleteRecordById = softDeleteRecordById;
 
 export async function bulkImportRecords(
   records: RecordInput[],
@@ -363,6 +450,7 @@ export async function bulkImportRecords(
             rpmKey: normalizeNumber(record.rpm),
             createdAt: new Date(record.createdAt),
             updatedAt: new Date(record.updatedAt),
+            deletedAt: record.deletedAt ? new Date(record.deletedAt) : null,
           })),
         );
       });

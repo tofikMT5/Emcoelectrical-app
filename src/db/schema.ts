@@ -29,6 +29,7 @@ export const windingRecords = pgTable("winding_records", {
   runningCapacitor: varchar("running_capacitor", { length: 160 }).notNull().default(""),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  deletedAt: timestamp("deleted_at", { withTimezone: true }),
 });
 
 export const appSettings = pgTable("app_settings", {
