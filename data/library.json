@@ -1,0 +1,63 @@
+{
+  "settings": {
+    "appName": "EMCO ELECTRICAL",
+    "workshopName": "MOTOR WINDING DATA"
+  },
+  "records": [
+    {
+      "companyName": "EMCO ELECTRICAL",
+      "description": "hello",
+      "frameSize": "71",
+      "hp": "0.5",
+      "phase": "3",
+      "rpm": "1440",
+      "od": "105 mm",
+      "idDimension": "65 mm",
+      "eLength": "75 mm",
+      "slot": "24",
+      "rSlot": "2.5",
+      "runningPitch": "1-8",
+      "runningTurns": "120",
+      "runningSwg": "22",
+      "runningWeight": "0.65 kg",
+      "runningConnection": "Series",
+      "startingPitch": "1-6",
+      "startingTurns": "160",
+      "startingSwg": "24",
+      "startingWeight": "0.45 kg",
+      "startingConnection": "Parallel",
+      "startingCapacitor": "100 µF / 250 VAC",
+      "runningCapacitor": "40 µF / 440 VAC",
+      "id": "cbe359d5-f295-49dc-b8c8-ff2ffdd7d359",
+      "createdAt": "2026-10-21T19:08:30.378Z",
+      "updatedAt": "2026-10-21T19:35:29.776Z"
+    },
+    {
+      "companyName": "SIEMENS - Exhaust Blower",
+      "frameSize": "71",
+      "hp": "0.50",
+      "phase": "3",
+      "rpm": "1440",
+      "od": "105 mm",
+      "idDimension": "65 mm",
+      "eLength": "80 mm",
+      "slot": "24",
+      "rSlot": "2.5",
+      "runningPitch": "1-7",
+      "runningTurns": "115",
+      "runningSwg": "21",
+      "runningWeight": "0.70 kg",
+      "runningConnection": "Series",
+      "startingPitch": "1-6",
+      "startingTurns": "150",
+      "startingSwg": "23",
+      "startingWeight": "0.50 kg",
+      "startingConnection": "Parallel",
+      "startingCapacitor": "80 µF",
+      "runningCapacitor": "35 µF",
+      "id": "ffef9946-ec9a-4462-bdc1-13049c122fca",
+      "createdAt": "2026-10-21T19:08:30.408Z",
+      "updatedAt": "2026-10-21T19:08:30.408Z"
+    }
+  ]
+}

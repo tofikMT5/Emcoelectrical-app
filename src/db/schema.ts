@@ -1,0 +1,39 @@
+import { pgTable, text, timestamp, uuid, varchar } from "drizzle-orm/pg-core";
+
+export const windingRecords = pgTable("winding_records", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  companyName: text("company_name").notNull(),
+  description: text("description").notNull().default(""),
+  frameSize: varchar("frame_size", { length: 80 }).notNull(),
+  hp: varchar("hp", { length: 80 }).notNull(),
+  hpKey: varchar("hp_key", { length: 80 }).notNull(),
+  phase: varchar("phase", { length: 80 }).notNull(),
+  rpm: varchar("rpm", { length: 80 }).notNull(),
+  rpmKey: varchar("rpm_key", { length: 80 }).notNull(),
+  od: varchar("od", { length: 120 }).notNull().default(""),
+  idDimension: varchar("id_dimension", { length: 120 }).notNull().default(""),
+  eLength: varchar("e_length", { length: 120 }).notNull().default(""),
+  slot: varchar("slot", { length: 120 }).notNull().default(""),
+  rSlot: varchar("r_slot", { length: 120 }).notNull().default(""),
+  runningPitch: varchar("running_pitch", { length: 120 }).notNull().default(""),
+  runningTurns: varchar("running_turns", { length: 120 }).notNull().default(""),
+  runningSwg: varchar("running_swg", { length: 120 }).notNull().default(""),
+  runningWeight: varchar("running_weight", { length: 120 }).notNull().default(""),
+  runningConnection: varchar("running_connection", { length: 120 }).notNull().default(""),
+  startingPitch: varchar("starting_pitch", { length: 120 }).notNull().default(""),
+  startingTurns: varchar("starting_turns", { length: 120 }).notNull().default(""),
+  startingSwg: varchar("starting_swg", { length: 120 }).notNull().default(""),
+  startingWeight: varchar("starting_weight", { length: 120 }).notNull().default(""),
+  startingConnection: varchar("starting_connection", { length: 120 }).notNull().default(""),
+  startingCapacitor: varchar("starting_capacitor", { length: 160 }).notNull().default(""),
+  runningCapacitor: varchar("running_capacitor", { length: 160 }).notNull().default(""),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const appSettings = pgTable("app_settings", {
+  id: varchar("id", { length: 32 }).primaryKey(),
+  appName: varchar("app_name", { length: 120 }).notNull(),
+  workshopName: varchar("workshop_name", { length: 160 }).notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
