@@ -33,6 +33,58 @@ if (pool && process.env.NODE_ENV !== "production") {
 
 export const db = pool ? drizzle(pool) : null;
 
+let initPromise: Promise<void> | null = null;
+async function ensureTables(): Promise<void> {
+  if (!pool) return;
+  if (!initPromise) {
+    initPromise = pool
+      .query(`
+        CREATE TABLE IF NOT EXISTS winding_records (
+          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          company_name TEXT NOT NULL,
+          description TEXT NOT NULL DEFAULT '',
+          frame_size VARCHAR(80) NOT NULL,
+          hp VARCHAR(80) NOT NULL,
+          hp_key VARCHAR(80) NOT NULL,
+          phase VARCHAR(80) NOT NULL,
+          rpm VARCHAR(80) NOT NULL,
+          rpm_key VARCHAR(80) NOT NULL,
+          od VARCHAR(120) NOT NULL DEFAULT '',
+          id_dimension VARCHAR(120) NOT NULL DEFAULT '',
+          e_length VARCHAR(120) NOT NULL DEFAULT '',
+          slot VARCHAR(120) NOT NULL DEFAULT '',
+          r_slot VARCHAR(120) NOT NULL DEFAULT '',
+          running_pitch VARCHAR(120) NOT NULL DEFAULT '',
+          running_turns VARCHAR(120) NOT NULL DEFAULT '',
+          running_swg VARCHAR(120) NOT NULL DEFAULT '',
+          running_weight VARCHAR(120) NOT NULL DEFAULT '',
+          running_connection VARCHAR(120) NOT NULL DEFAULT '',
+          starting_pitch VARCHAR(120) NOT NULL DEFAULT '',
+          starting_turns VARCHAR(120) NOT NULL DEFAULT '',
+          starting_swg VARCHAR(120) NOT NULL DEFAULT '',
+          starting_weight VARCHAR(120) NOT NULL DEFAULT '',
+          starting_connection VARCHAR(120) NOT NULL DEFAULT '',
+          starting_capacitor VARCHAR(160) NOT NULL DEFAULT '',
+          running_capacitor VARCHAR(160) NOT NULL DEFAULT '',
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+        ALTER TABLE winding_records ADD COLUMN IF NOT EXISTS description TEXT NOT NULL DEFAULT '';
+        CREATE TABLE IF NOT EXISTS app_settings (
+          id VARCHAR(32) PRIMARY KEY,
+          app_name VARCHAR(120) NOT NULL,
+          workshop_name VARCHAR(160) NOT NULL,
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+      `)
+      .then(() => {})
+      .catch((err) => {
+        console.warn("Could not ensure database tables:", err);
+      });
+  }
+  return initPromise;
+}
+
 const DEFAULT_SETTINGS: Settings = {
   appName: "Motor Winding Library",
   workshopName: "Workshop Library",
@@ -93,6 +145,7 @@ export async function findRecords(filters: RecordFilterParams = {}): Promise<Win
 
   if (db) {
     try {
+      await ensureTables();
       const conditions = [];
       if (frameSize) conditions.push(ilike(windingRecords.frameSize, frameSize));
       if (hp) conditions.push(eq(windingRecords.hpKey, hp));
@@ -173,6 +226,7 @@ export async function findRecords(filters: RecordFilterParams = {}): Promise<Win
 export async function findRecordById(id: string): Promise<WindingRecord | null> {
   if (db) {
     try {
+      await ensureTables();
       const [record] = await db
         .select()
         .from(windingRecords)
@@ -199,6 +253,7 @@ export async function insertRecord(input: RecordInput): Promise<WindingRecord> {
 
   if (db) {
     try {
+      await ensureTables();
       const [record] = await db
         .insert(windingRecords)
         .values({
@@ -230,6 +285,7 @@ export async function updateRecordById(
 
   if (db) {
     try {
+      await ensureTables();
       const [record] = await db
         .update(windingRecords)
         .set({
@@ -264,6 +320,7 @@ export async function updateRecordById(
 export async function deleteRecordById(id: string): Promise<boolean> {
   if (db) {
     try {
+      await ensureTables();
       const [record] = await db
         .delete(windingRecords)
         .where(eq(windingRecords.id, id))
@@ -296,6 +353,7 @@ export async function bulkImportRecords(
 
   if (db) {
     try {
+      await ensureTables();
       await db.transaction(async (tx) => {
         if (mode === "replace") await tx.delete(windingRecords);
         await tx.insert(windingRecords).values(
@@ -327,6 +385,7 @@ export async function bulkImportRecords(
 export async function fetchSettings(): Promise<Settings> {
   if (db) {
     try {
+      await ensureTables();
       const [existing] = await db
         .select()
         .from(appSettings)
@@ -354,6 +413,7 @@ export async function fetchSettings(): Promise<Settings> {
 export async function updateSettings(settings: Settings): Promise<Settings> {
   if (db) {
     try {
+      await ensureTables();
       const [saved] = await db
         .insert(appSettings)
         .values({
