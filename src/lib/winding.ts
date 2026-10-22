@@ -36,11 +36,362 @@ export const RECORD_FIELDS = [
   "runningCapacitor",
 ] as const;
 
+export type ShaftSegment = {
+  id: string;
+  name?: string;
+  length: number; // in mm
+  diameter?: number; // relative diameter/step height
+};
+
+export const NOTEBOOK_SEGMENT_TEMPLATE: ShaftSegment[] = [
+  { id: "seg-1", name: "Front extension", length: 60 },
+  { id: "seg-2", name: "Front bearing seat", length: 40 },
+  { id: "seg-3", name: "Front collar", length: 50 },
+  { id: "seg-4", name: "Rotor core seat", length: 100 },
+  { id: "seg-5", name: "Back bearing seat", length: 25 },
+  { id: "seg-6", name: "Back extension", length: 25 },
+];
+
+export type MotorDrawingData = {
+  frameSize?: string;
+  bodyLength?: string; // in mm
+  frontBearingCover?: string; // in mm
+  backBearingCover?: string; // in mm
+  shaftSegments?: ShaftSegment[];
+  notes?: string;
+};
+
+export type CostItemKey =
+  | "ciCasting"
+  | "stamping"
+  | "rotorDieCast"
+  | "shaft"
+  | "frontBearing"
+  | "backBearing"
+  | "tbfc"
+  | "copperWire"
+  | "insulating"
+  | "windingLabor"
+  | "motorTestingLabor"
+  | "otherCharges";
+
+export const COST_ITEM_KEYS: CostItemKey[] = [
+  "ciCasting",
+  "stamping",
+  "rotorDieCast",
+  "shaft",
+  "frontBearing",
+  "backBearing",
+  "tbfc",
+  "copperWire",
+  "insulating",
+  "windingLabor",
+  "motorTestingLabor",
+  "otherCharges",
+];
+
+export const COST_ITEM_LABELS: Record<CostItemKey, string> = {
+  ciCasting: "C.I. Casting",
+  stamping: "Stamping",
+  rotorDieCast: "Rotor Die Cast",
+  shaft: "Shaft",
+  frontBearing: "Front Bearing",
+  backBearing: "Back Bearing",
+  tbfc: "T.B.F.C.", // Handwritten abbreviation kept editable and visible
+  copperWire: "Copper Wire",
+  insulating: "Insulating",
+  windingLabor: "Winding Labor",
+  motorTestingLabor: "Motor Testing Labor",
+  otherCharges: "Other Charges",
+};
+
+export type CostItems = Record<CostItemKey, number>;
+
+export const emptyCostItems = (): CostItems => ({
+  ciCasting: 0,
+  stamping: 0,
+  rotorDieCast: 0,
+  shaft: 0,
+  frontBearing: 0,
+  backBearing: 0,
+  tbfc: 0,
+  copperWire: 0,
+  insulating: 0,
+  windingLabor: 0,
+  motorTestingLabor: 0,
+  otherCharges: 0,
+});
+
+export const calculateCostTotal = (items: Partial<CostItems>): number => {
+  const sum = COST_ITEM_KEYS.reduce((acc, key) => {
+    const val = Number(items[key]);
+    return acc + (Number.isFinite(val) && val > 0 ? val : 0);
+  }, 0);
+  return Math.round(sum * 100) / 100;
+};
+
+export type PriceAdjustmentHistoryEntry = {
+  id: string;
+  appliedAt: string;
+  percentage: number;
+  note?: string;
+  previousTotal: number;
+  updatedTotal: number;
+  previousItems: Record<string, number>;
+};
+
+export type DrawingElement =
+  | {
+      id: string;
+      type: "line";
+      x1: number;
+      y1: number;
+      x2: number;
+      y2: number;
+      strokeWidth?: number;
+      strokeDasharray?: string;
+    }
+  | {
+      id: string;
+      type: "dimension";
+      x1: number;
+      y1: number;
+      x2: number;
+      y2: number;
+      value: string;
+      label?: string;
+      offset?: number;
+    }
+  | {
+      id: string;
+      type: "text";
+      x: number;
+      y: number;
+      text: string;
+      fontSize?: number;
+    };
+
+export type ShaftDrawing = {
+  templateId?: string;
+  templateName?: string;
+  elements: DrawingElement[];
+  dimensionValues?: Record<string, string>;
+  dimensionLabels?: Record<string, string>;
+  viewBoxWidth: number;
+  viewBoxHeight: number;
+  notes?: string;
+};
+
+export type ShaftDrawingTemplate = {
+  id: string;
+  name: string;
+  description?: string;
+  elements: DrawingElement[];
+  viewBoxWidth: number;
+  viewBoxHeight: number;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export const DEFAULT_SHAFT_TEMPLATE: ShaftDrawingTemplate = {
+  id: "template-single-phase-common",
+  name: "Single Phase Common Shaft",
+  description: "Standard stepped shaft profile with bearing seats, collar steps, core seat, and extensions.",
+  viewBoxWidth: 800,
+  viewBoxHeight: 360,
+  elements: [
+    { id: "line-center", type: "line", x1: 40, y1: 180, x2: 760, y2: 180, strokeWidth: 1 },
+    { id: "line-1", type: "line", x1: 60, y1: 155, x2: 60, y2: 205 },
+    { id: "line-2", type: "line", x1: 60, y1: 155, x2: 140, y2: 155 },
+    { id: "line-3", type: "line", x1: 60, y1: 205, x2: 140, y2: 205 },
+    { id: "line-4", type: "line", x1: 140, y1: 155, x2: 140, y2: 140 },
+    { id: "line-5", type: "line", x1: 140, y1: 205, x2: 140, y2: 220 },
+    { id: "line-6", type: "line", x1: 140, y1: 140, x2: 210, y2: 140 },
+    { id: "line-7", type: "line", x1: 140, y1: 220, x2: 210, y2: 220 },
+    { id: "line-8", type: "line", x1: 210, y1: 140, x2: 210, y2: 120 },
+    { id: "line-9", type: "line", x1: 210, y1: 220, x2: 210, y2: 240 },
+    { id: "line-10", type: "line", x1: 210, y1: 120, x2: 270, y2: 120 },
+    { id: "line-11", type: "line", x1: 210, y1: 240, x2: 270, y2: 240 },
+    { id: "line-12", type: "line", x1: 270, y1: 120, x2: 270, y2: 95 },
+    { id: "line-13", type: "line", x1: 270, y1: 240, x2: 270, y2: 265 },
+    { id: "line-14", type: "line", x1: 270, y1: 95, x2: 430, y2: 95 },
+    { id: "line-15", type: "line", x1: 270, y1: 265, x2: 430, y2: 265 },
+    { id: "line-16", type: "line", x1: 430, y1: 95, x2: 430, y2: 120 },
+    { id: "line-17", type: "line", x1: 430, y1: 265, x2: 430, y2: 240 },
+    { id: "line-18", type: "line", x1: 430, y1: 120, x2: 570, y2: 120 },
+    { id: "line-19", type: "line", x1: 430, y1: 240, x2: 570, y2: 240 },
+    { id: "line-20", type: "line", x1: 570, y1: 120, x2: 570, y2: 140 },
+    { id: "line-21", type: "line", x1: 570, y1: 240, x2: 570, y2: 220 },
+    { id: "line-22", type: "line", x1: 570, y1: 140, x2: 630, y2: 140 },
+    { id: "line-23", type: "line", x1: 570, y1: 220, x2: 630, y2: 220 },
+    { id: "line-24", type: "line", x1: 630, y1: 140, x2: 630, y2: 155 },
+    { id: "line-25", type: "line", x1: 630, y1: 220, x2: 630, y2: 205 },
+    { id: "line-26", type: "line", x1: 630, y1: 155, x2: 690, y2: 155 },
+    { id: "line-27", type: "line", x1: 630, y1: 205, x2: 690, y2: 205 },
+    { id: "line-28", type: "line", x1: 690, y1: 155, x2: 690, y2: 165 },
+    { id: "line-29", type: "line", x1: 690, y1: 205, x2: 690, y2: 195 },
+    { id: "line-30", type: "line", x1: 690, y1: 165, x2: 740, y2: 165 },
+    { id: "line-31", type: "line", x1: 690, y1: 195, x2: 740, y2: 195 },
+    { id: "line-32", type: "line", x1: 740, y1: 165, x2: 740, y2: 195 },
+    { id: "dim-1", type: "dimension", x1: 60, y1: 155, x2: 140, y2: 155, offset: -35, value: "60 mm", label: "Front Extension" },
+    { id: "dim-2", type: "dimension", x1: 140, y1: 140, x2: 210, y2: 140, offset: -35, value: "40 mm", label: "Front Bearing Seat" },
+    { id: "dim-3", type: "dimension", x1: 210, y1: 120, x2: 270, y2: 120, offset: -35, value: "50 mm", label: "Front Collar" },
+    { id: "dim-4", type: "dimension", x1: 270, y1: 95, x2: 430, y2: 95, offset: -35, value: "100 mm", label: "Rotor Core Seat" },
+    { id: "dim-5", type: "dimension", x1: 430, y1: 120, x2: 570, y2: 120, offset: -35, value: "110 mm", label: "Body Shaft Length" },
+    { id: "dim-6", type: "dimension", x1: 570, y1: 140, x2: 630, y2: 140, offset: -35, value: "25 mm", label: "Back Bearing Seat" },
+    { id: "dim-7", type: "dimension", x1: 630, y1: 155, x2: 690, y2: 155, offset: -35, value: "25 mm", label: "Back Collar" },
+    { id: "dim-8", type: "dimension", x1: 690, y1: 165, x2: 740, y2: 165, offset: -35, value: "25 mm", label: "Back Extension" },
+    { id: "dim-overall", type: "dimension", x1: 60, y1: 95, x2: 740, y2: 95, offset: -68, value: "435 mm", label: "Total Shaft Length" },
+    { id: "text-front", type: "text", x: 75, y: 310, text: "◄ FRONT (DE)", fontSize: 13 },
+    { id: "text-back", type: "text", x: 670, y: 310, text: "BACK (NDE) ►", fontSize: 13 },
+  ],
+  createdAt: "2026-10-22T00:00:00.000Z",
+  updatedAt: "2026-10-22T00:00:00.000Z",
+};
+
+export const SHAFT_PROFILE_2_TEMPLATE: ShaftDrawingTemplate = {
+  id: "template-shaft-profile-2",
+  name: "Shaft Profile 2",
+  description: "Stepped shaft outline with elongated front extension, collar, core seat, and 3-step rear journal.",
+  viewBoxWidth: 800,
+  viewBoxHeight: 360,
+  elements: [
+    { id: "p2-line-center", type: "line", x1: 40, y1: 180, x2: 760, y2: 180, strokeWidth: 1, strokeDasharray: "8 5" },
+    { id: "p2-line-1", type: "line", x1: 50, y1: 165, x2: 50, y2: 195 },
+    { id: "p2-line-2", type: "line", x1: 50, y1: 165, x2: 150, y2: 165 },
+    { id: "p2-line-3", type: "line", x1: 50, y1: 195, x2: 150, y2: 195 },
+    { id: "p2-line-4", type: "line", x1: 150, y1: 165, x2: 150, y2: 145 },
+    { id: "p2-line-5", type: "line", x1: 150, y1: 195, x2: 150, y2: 215 },
+    { id: "p2-line-6", type: "line", x1: 150, y1: 145, x2: 215, y2: 145 },
+    { id: "p2-line-7", type: "line", x1: 150, y1: 215, x2: 215, y2: 215 },
+    { id: "p2-line-8", type: "line", x1: 215, y1: 145, x2: 215, y2: 125 },
+    { id: "p2-line-9", type: "line", x1: 215, y1: 215, x2: 215, y2: 235 },
+    { id: "p2-line-10", type: "line", x1: 215, y1: 125, x2: 270, y2: 125 },
+    { id: "p2-line-11", type: "line", x1: 215, y1: 235, x2: 270, y2: 235 },
+    { id: "p2-line-12", type: "line", x1: 270, y1: 125, x2: 270, y2: 95 },
+    { id: "p2-line-13", type: "line", x1: 270, y1: 235, x2: 270, y2: 265 },
+    { id: "p2-line-14", type: "line", x1: 270, y1: 95, x2: 375, y2: 95 },
+    { id: "p2-line-15", type: "line", x1: 270, y1: 265, x2: 375, y2: 265 },
+    { id: "p2-line-16", type: "line", x1: 375, y1: 95, x2: 375, y2: 125 },
+    { id: "p2-line-17", type: "line", x1: 375, y1: 265, x2: 375, y2: 235 },
+    { id: "p2-line-18", type: "line", x1: 375, y1: 125, x2: 590, y2: 125 },
+    { id: "p2-line-19", type: "line", x1: 375, y1: 235, x2: 590, y2: 235 },
+    { id: "p2-line-20", type: "line", x1: 590, y1: 125, x2: 590, y2: 145 },
+    { id: "p2-line-21", type: "line", x1: 590, y1: 235, x2: 590, y2: 215 },
+    { id: "p2-line-22", type: "line", x1: 590, y1: 145, x2: 655, y2: 145 },
+    { id: "p2-line-23", type: "line", x1: 590, y1: 215, x2: 655, y2: 215 },
+    { id: "p2-line-24", type: "line", x1: 655, y1: 145, x2: 655, y2: 160 },
+    { id: "p2-line-25", type: "line", x1: 655, y1: 215, x2: 655, y2: 200 },
+    { id: "p2-line-26", type: "line", x1: 655, y1: 160, x2: 715, y2: 160 },
+    { id: "p2-line-27", type: "line", x1: 655, y1: 200, x2: 715, y2: 200 },
+    { id: "p2-line-28", type: "line", x1: 715, y1: 160, x2: 715, y2: 170 },
+    { id: "p2-line-29", type: "line", x1: 715, y1: 200, x2: 715, y2: 190 },
+    { id: "p2-line-30", type: "line", x1: 715, y1: 170, x2: 745, y2: 170 },
+    { id: "p2-line-31", type: "line", x1: 715, y1: 190, x2: 745, y2: 190 },
+    { id: "p2-line-32", type: "line", x1: 745, y1: 170, x2: 745, y2: 190 },
+    { id: "p2-dim-1", type: "dimension", x1: 50, y1: 165, x2: 150, y2: 165, offset: -35, value: "", label: "Front Extension" },
+    { id: "p2-dim-2", type: "dimension", x1: 150, y1: 145, x2: 215, y2: 145, offset: -35, value: "", label: "Front Bearing Seat" },
+    { id: "p2-dim-3", type: "dimension", x1: 215, y1: 125, x2: 270, y2: 125, offset: -35, value: "", label: "Front Collar" },
+    { id: "p2-dim-4", type: "dimension", x1: 270, y1: 95, x2: 375, y2: 95, offset: -35, value: "", label: "Rotor Core Seat" },
+    { id: "p2-dim-5", type: "dimension", x1: 375, y1: 125, x2: 590, y2: 125, offset: -35, value: "", label: "Body Shaft Length" },
+    { id: "p2-dim-6", type: "dimension", x1: 590, y1: 145, x2: 655, y2: 145, offset: -35, value: "", label: "Back Bearing Seat" },
+    { id: "p2-dim-7", type: "dimension", x1: 655, y1: 160, x2: 715, y2: 160, offset: -35, value: "", label: "Back Collar" },
+    { id: "p2-dim-8", type: "dimension", x1: 715, y1: 170, x2: 745, y2: 170, offset: -35, value: "", label: "Back Extension" },
+    { id: "p2-dim-overall", type: "dimension", x1: 50, y1: 95, x2: 745, y2: 95, offset: -68, value: "", label: "Total Shaft Length" },
+    { id: "p2-text-front", type: "text", x: 75, y: 310, text: "◄ FRONT (DE)", fontSize: 13 },
+    { id: "p2-text-back", type: "text", x: 670, y: 310, text: "BACK (NDE) ►", fontSize: 13 },
+  ],
+  createdAt: "2026-10-22T00:00:00.000Z",
+  updatedAt: "2026-10-22T00:00:00.000Z",
+};
+
+export const SHAFT_PROFILE_3_TEMPLATE: ShaftDrawingTemplate = {
+  id: "template-shaft-profile-3",
+  name: "Shaft Profile 3",
+  description: "Stepped shaft outline with stepped front collar and heavy rear journal extension.",
+  viewBoxWidth: 800,
+  viewBoxHeight: 360,
+  elements: [
+    { id: "p3-line-center", type: "line", x1: 40, y1: 180, x2: 760, y2: 180, strokeWidth: 1, strokeDasharray: "8 5" },
+    { id: "p3-line-1", type: "line", x1: 50, y1: 155, x2: 50, y2: 205 },
+    { id: "p3-line-2", type: "line", x1: 50, y1: 155, x2: 140, y2: 155 },
+    { id: "p3-line-3", type: "line", x1: 50, y1: 205, x2: 140, y2: 205 },
+    { id: "p3-line-4", type: "line", x1: 140, y1: 155, x2: 140, y2: 135 },
+    { id: "p3-line-5", type: "line", x1: 140, y1: 205, x2: 140, y2: 225 },
+    { id: "p3-line-6", type: "line", x1: 140, y1: 135, x2: 220, y2: 135 },
+    { id: "p3-line-7", type: "line", x1: 140, y1: 225, x2: 220, y2: 225 },
+    { id: "p3-line-8", type: "line", x1: 220, y1: 135, x2: 220, y2: 120 },
+    { id: "p3-line-9", type: "line", x1: 220, y1: 225, x2: 220, y2: 240 },
+    { id: "p3-line-10", type: "line", x1: 220, y1: 120, x2: 280, y2: 120 },
+    { id: "p3-line-11", type: "line", x1: 220, y1: 240, x2: 280, y2: 240 },
+    { id: "p3-line-12", type: "line", x1: 280, y1: 120, x2: 280, y2: 95 },
+    { id: "p3-line-13", type: "line", x1: 280, y1: 240, x2: 280, y2: 265 },
+    { id: "p3-line-14", type: "line", x1: 280, y1: 95, x2: 400, y2: 95 },
+    { id: "p3-line-15", type: "line", x1: 280, y1: 265, x2: 400, y2: 265 },
+    { id: "p3-line-16", type: "line", x1: 400, y1: 95, x2: 400, y2: 120 },
+    { id: "p3-line-17", type: "line", x1: 400, y1: 265, x2: 400, y2: 240 },
+    { id: "p3-line-18", type: "line", x1: 400, y1: 120, x2: 600, y2: 120 },
+    { id: "p3-line-19", type: "line", x1: 400, y1: 240, x2: 600, y2: 240 },
+    { id: "p3-line-20", type: "line", x1: 600, y1: 120, x2: 600, y2: 145 },
+    { id: "p3-line-21", type: "line", x1: 600, y1: 240, x2: 600, y2: 215 },
+    { id: "p3-line-22", type: "line", x1: 600, y1: 145, x2: 740, y2: 145 },
+    { id: "p3-line-23", type: "line", x1: 600, y1: 215, x2: 740, y2: 215 },
+    { id: "p3-line-24", type: "line", x1: 740, y1: 145, x2: 740, y2: 215 },
+    { id: "p3-dim-1", type: "dimension", x1: 50, y1: 155, x2: 140, y2: 155, offset: -35, value: "", label: "Front Extension" },
+    { id: "p3-dim-2", type: "dimension", x1: 140, y1: 135, x2: 220, y2: 135, offset: -35, value: "", label: "Front Bearing Seat" },
+    { id: "p3-dim-3", type: "dimension", x1: 220, y1: 120, x2: 280, y2: 120, offset: -35, value: "", label: "Front Collar" },
+    { id: "p3-dim-4", type: "dimension", x1: 280, y1: 95, x2: 400, y2: 95, offset: -35, value: "", label: "Rotor Core Seat" },
+    { id: "p3-dim-5", type: "dimension", x1: 400, y1: 120, x2: 600, y2: 120, offset: -35, value: "", label: "Body Shaft Length" },
+    { id: "p3-dim-6", type: "dimension", x1: 600, y1: 145, x2: 740, y2: 145, offset: -35, value: "", label: "Back Shaft / Extension" },
+    { id: "p3-dim-overall", type: "dimension", x1: 50, y1: 95, x2: 740, y2: 95, offset: -68, value: "", label: "Total Shaft Length" },
+    { id: "p3-text-front", type: "text", x: 75, y: 310, text: "◄ FRONT (DE)", fontSize: 13 },
+    { id: "p3-text-back", type: "text", x: 670, y: 310, text: "BACK (NDE) ►", fontSize: 13 },
+  ],
+  createdAt: "2026-10-22T00:00:00.000Z",
+  updatedAt: "2026-10-22T00:00:00.000Z",
+};
+
+export const DEFAULT_SHAFT_TEMPLATES: ShaftDrawingTemplate[] = [
+  DEFAULT_SHAFT_TEMPLATE,
+  SHAFT_PROFILE_2_TEMPLATE,
+  SHAFT_PROFILE_3_TEMPLATE,
+];
+
+export type MotorCostingRecord = {
+  id: string;
+  motorRecordId?: string | null;
+  companyName: string;
+  jobName?: string;
+  jobDate?: string;
+  notes?: string;
+  frameSize: string;
+  hp: string;
+  phase: string;
+  rpm: string;
+  bodyLength: string;
+  frontBearingCover: string;
+  backBearingCover: string;
+  tbfcLabel?: string;
+  items: CostItems;
+  totalAmount: number;
+  adjustmentHistory?: PriceAdjustmentHistoryEntry[];
+  lastAdjustmentPercentage?: number;
+  lastAdjustmentDate?: string;
+  drawing?: ShaftDrawing | null;
+  drawingData?: string;
+  createdAt: string;
+  updatedAt: string;
+  deletedAt?: string | null;
+};
+
 export type RecordField = (typeof RECORD_FIELDS)[number];
-export type RecordInput = Record<RecordField, string>;
+export type RecordInput = Record<RecordField, string> & {
+  drawingData?: string;
+};
 
 export type WindingRecord = RecordInput & {
   id: string;
+  drawingData?: string;
   createdAt: string;
   updatedAt: string;
   deletedAt?: string | null;
@@ -114,11 +465,22 @@ export const displayPhase = (phase: string) => {
 
 export const coerceRecordInput = (payload: unknown): RecordInput => {
   const source = payload && typeof payload === "object" ? (payload as Record<string, unknown>) : {};
-  return RECORD_FIELDS.reduce((result, field) => {
+  const result = RECORD_FIELDS.reduce((acc, field) => {
     const value = source[field];
-    result[field] = typeof value === "string" || typeof value === "number" ? normalizeValue(String(value)) : "";
-    return result;
+    acc[field] = typeof value === "string" || typeof value === "number" ? normalizeValue(String(value)) : "";
+    return acc;
   }, {} as RecordInput);
+
+  if (typeof source.drawingData === "string") {
+    result.drawingData = source.drawingData;
+  } else if (source.drawingData && typeof source.drawingData === "object") {
+    try {
+      result.drawingData = JSON.stringify(source.drawingData);
+    } catch {
+      result.drawingData = "";
+    }
+  }
+  return result;
 };
 
 export const validateRecord = (record: RecordInput): Record<RecordField, string> => {

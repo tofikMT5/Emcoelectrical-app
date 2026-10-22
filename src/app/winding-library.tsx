@@ -3,6 +3,7 @@
 import { ChangeEvent, FormEvent, ReactNode, useCallback, useEffect, useMemo, useState } from "react";
 import Image from "next/image";
 import {
+  emptyCostItems,
   emptyRecord,
   FRAME_SIZES,
   HP_VALUES,
@@ -19,23 +20,44 @@ import {
   isThreePhase,
   normalizeNumber,
   normalizePhase,
+  type MotorCostingRecord,
   type RecordField,
   type RecordInput,
   type Settings,
   type WindingRecord,
 } from "@/lib/winding";
+import { parseDrawingData } from "@/components/technical-drawing";
+import { CostingForm, CostingScreen } from "@/components/costing-screen";
 
-type View = "search" | "add" | "saved" | "recycle" | "settings" | "details";
+type View = "search" | "add" | "saved" | "costing" | "add-costing" | "edit-costing" | "recycle" | "settings" | "details";
 type FilterState = { q: string; frameSize: string; hp: string; phase: string; rpm: string };
 type Notice = { type: "success" | "error"; text: string } | null;
-type IconName = "search" | "plus" | "archive" | "settings" | "arrow" | "edit" | "trash" | "print" | "download" | "upload" | "close" | "sliders" | "check" | "database" | "share";
+type IconName =
+  | "search"
+  | "plus"
+  | "archive"
+  | "settings"
+  | "arrow"
+  | "edit"
+  | "trash"
+  | "print"
+  | "download"
+  | "upload"
+  | "close"
+  | "sliders"
+  | "check"
+  | "database"
+  | "share"
+  | "costing"
+  | "sketch";
 
 const defaultSettings: Settings = { appName: "Motor Winding Library", workshopName: "Workshop Library" };
 const blankFilters = (): FilterState => ({ q: "", frameSize: "", hp: "", phase: "", rpm: "" });
-const navItems: { id: Exclude<View, "details">; label: string; icon: IconName }[] = [
+const navItems: { id: Exclude<View, "details" | "add-costing" | "edit-costing">; label: string; icon: IconName }[] = [
   { id: "search", label: "Search records", icon: "search" },
   { id: "add", label: "Add new record", icon: "plus" },
   { id: "saved", label: "Saved records", icon: "archive" },
+  { id: "costing", label: "Motor Costing", icon: "costing" },
   { id: "recycle", label: "Recycle bin", icon: "trash" },
   { id: "settings", label: "Settings & backup", icon: "settings" },
 ];
@@ -58,6 +80,8 @@ function Icon({ name, size = 20 }: { name: IconName; size?: number }) {
     check: <path d="m5 12 4 4L19 6" />,
     database: <><ellipse cx="12" cy="5" rx="8" ry="3" /><path d="M4 5v7c0 1.7 3.6 3 8 3s8-1.3 8-3V5M4 12v7c0 1.7 3.6 3 8 3s8-1.3 8-3v-7" /></>,
     share: <><circle cx="18" cy="5" r="3" /><circle cx="6" cy="12" r="3" /><circle cx="18" cy="19" r="3" /><path d="m8.6 10.7 6.8-4.1M8.6 13.3l6.8 4.1" /></>,
+    costing: <><path d="M6 3h12v18l-3-2-3 2-3-2-3 2V3z" /><path d="M9 8h6M9 12h6M9 16h4" /></>,
+    sketch: <><path d="m3 21 1-1h16l1 1M18 3l-7 7-4-4-4 4 1.5 1.5" /><circle cx="12" cy="12" r="2" /></>,
   };
   return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{paths[name]}</svg>;
 }
@@ -201,6 +225,26 @@ export default function WindingLibrary() {
   const [recycleRecords, setRecycleRecords] = useState<WindingRecord[]>([]);
   const [recycleLoading, setRecycleLoading] = useState(false);
 
+  // Motor Costing state
+  const [costingRecords, setCostingRecords] = useState<MotorCostingRecord[]>([]);
+  const [costingLoading, setCostingLoading] = useState(false);
+  const [editingCostingRecord, setEditingCostingRecord] = useState<MotorCostingRecord | null>(null);
+
+  const loadCostingRecords = useCallback(async () => {
+    setCostingLoading(true);
+    try {
+      const response = await fetch("/api/costing", { cache: "no-store" });
+      const data = await response.json();
+      if (response.ok && Array.isArray(data.records)) {
+        setCostingRecords(data.records as MotorCostingRecord[]);
+      }
+    } catch {
+      // ignore
+    } finally {
+      setCostingLoading(false);
+    }
+  }, []);
+
   const loadRecycleRecords = useCallback(async () => {
     setRecycleLoading(true);
     try {
@@ -237,6 +281,7 @@ export default function WindingLibrary() {
           fetch("/api/settings", { cache: "no-store" }),
           loadRecords(),
           loadRecycleRecords(),
+          loadCostingRecords(),
         ]);
         const settingsData = await settingsResponse.json();
         if (settingsResponse.ok && settingsData.settings) {
@@ -245,7 +290,7 @@ export default function WindingLibrary() {
       } catch { setNotice({ type: "error", text: "Could not connect to the workshop library." }); }
     };
     void initialise();
-  }, [loadRecords, loadRecycleRecords]);
+  }, [loadRecords, loadRecycleRecords, loadCostingRecords]);
 
   const isDirty = useMemo(() => (view === "add" && JSON.stringify(form) !== JSON.stringify(formStart)), [view, form, formStart]);
   useEffect(() => {
@@ -302,6 +347,67 @@ export default function WindingLibrary() {
       else { setFormStart(payload); setSelected(data.record as WindingRecord); setView("details"); }
     } catch (error) { setNotice({ type: "error", text: error instanceof Error ? error.message : "Could not save this record." }); }
     finally { setSaving(false); }
+  };
+
+
+  const openCostingForMotor = (motor: WindingRecord) => {
+    const drawing = parseDrawingData(motor.drawingData);
+    const blankCosting: MotorCostingRecord = {
+      id: "",
+      motorRecordId: motor.id,
+      companyName: motor.companyName,
+      frameSize: motor.frameSize,
+      hp: motor.hp,
+      phase: motor.phase,
+      rpm: motor.rpm,
+      bodyLength: drawing?.bodyLength || "",
+      frontBearingCover: drawing?.frontBearingCover || "",
+      backBearingCover: drawing?.backBearingCover || "",
+      items: emptyCostItems(),
+      totalAmount: 0,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    setEditingCostingRecord(blankCosting);
+    setView("add-costing");
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+
+  const saveCostingRecord = async (data: Partial<MotorCostingRecord>) => {
+    setSaving(true);
+    try {
+      const isEdit = Boolean(editingCostingRecord?.id);
+      const url = isEdit ? `/api/costing/${editingCostingRecord!.id}` : "/api/costing";
+      const method = isEdit ? "PATCH" : "POST";
+      const response = await fetch(url, {
+        method,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+      });
+      const resData = await response.json();
+      if (!response.ok) throw new Error(resData.message || "Could not save costing record.");
+      setNotice({ type: "success", text: isEdit ? "Costing record updated." : "Costing record saved." });
+      await loadCostingRecords();
+      setEditingCostingRecord(null);
+      setView("costing");
+    } catch (err) {
+      setNotice({ type: "error", text: err instanceof Error ? err.message : "Error saving costing record." });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const deleteCosting = async (record: MotorCostingRecord) => {
+    if (!window.confirm(`Delete costing sheet for “${record.companyName}”?`)) return;
+    try {
+      const response = await fetch(`/api/costing/${record.id}?permanent=true`, { method: "DELETE" });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.message || "Could not delete costing record.");
+      setNotice({ type: "success", text: `Costing record for “${record.companyName}” deleted.` });
+      await loadCostingRecords();
+    } catch (err) {
+      setNotice({ type: "error", text: err instanceof Error ? err.message : "Could not delete costing record." });
+    }
   };
 
   const deleteRecord = async (record: WindingRecord) => {
@@ -374,36 +480,94 @@ export default function WindingLibrary() {
     } catch (error) { setNotice({ type: "error", text: error instanceof Error ? error.message : "Could not save settings." }); }
   };
 
-  const download = (content: string, filename: string, type: string) => {
-    const url = URL.createObjectURL(new Blob([content], { type })); const anchor = document.createElement("a"); anchor.href = url; anchor.download = filename; anchor.click(); URL.revokeObjectURL(url);
-  };
-
-  const exportRecords = async (format: "json" | "csv") => {
+  const exportRecords = async (format: "json" | "csv" | "costing-csv") => {
+    const date = new Date().toISOString().slice(0, 10);
     try {
-      const response = await fetch("/api/records", { cache: "no-store" }); const data = await response.json();
-      if (!response.ok) throw new Error("Could not prepare the backup.");
-      const all = data.records as WindingRecord[]; const date = new Date().toISOString().slice(0, 10);
-      if (format === "json") download(JSON.stringify({ app: "Motor Winding Library", exportedAt: new Date().toISOString(), settings, records: all }, null, 2), `motor-winding-library-${date}.json`, "application/json");
-      else download(recordsToCsv(all), `motor-winding-library-${date}.csv`, "text/csv;charset=utf-8");
-      setNotice({ type: "success", text: `${all.length} record(s) exported as ${format.toUpperCase()}.` });
-    } catch (error) { setNotice({ type: "error", text: error instanceof Error ? error.message : "Could not export records." }); }
+      const response = await fetch(`/api/export?format=${format}`, { cache: "no-store" });
+      if (!response.ok) throw new Error("Could not prepare export file.");
+      const blob = await response.blob();
+      const filename =
+        format === "json"
+          ? `emco-motor-winding-backup-${date}.json`
+          : format === "costing-csv"
+          ? `emco-motor-costing-backup-${date}.csv`
+          : `emco-motor-winding-backup-${date}.csv`;
+
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.style.display = "none";
+      anchor.href = url;
+      anchor.download = filename;
+      anchor.setAttribute("download", filename);
+      document.body.appendChild(anchor);
+      anchor.click();
+      setTimeout(() => {
+        document.body.removeChild(anchor);
+        URL.revokeObjectURL(url);
+      }, 2500);
+
+      setNotice({
+        type: "success",
+        text: `File "${filename}" downloaded successfully.`,
+      });
+    } catch (error) {
+      setNotice({
+        type: "error",
+        text: error instanceof Error ? error.message : "Could not export records.",
+      });
+    }
   };
 
   const importFile = async (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0]; event.target.value = ""; if (!file) return;
     setImporting(true);
     try {
-      const content = await file.text(); let imported: unknown[];
-      if (file.name.toLowerCase().endsWith(".csv")) imported = parseCsv(content);
-      else { const parsed = JSON.parse(content); imported = Array.isArray(parsed) ? parsed : parsed.records; if (!Array.isArray(imported)) throw new Error("JSON backup must include a records list."); }
+      const content = await file.text();
+      let imported: unknown[];
+      let costingToImport: unknown[] | undefined = undefined;
+
+      if (file.name.toLowerCase().endsWith(".csv")) {
+        imported = parseCsv(content);
+      } else {
+        const parsed = JSON.parse(content);
+        imported = Array.isArray(parsed) ? parsed : parsed.records;
+        if (!Array.isArray(imported)) throw new Error("JSON backup must include a records list.");
+        if (Array.isArray(parsed.costingRecords)) {
+          costingToImport = parsed.costingRecords;
+        }
+      }
+
       if (!imported.length) throw new Error("There are no records to import.");
-      const warning = importMode === "replace" ? `Replace every current record with ${imported.length} imported record(s)? This cannot be undone.` : `Add ${imported.length} imported record(s) to the current library?`;
+      const warning =
+        importMode === "replace"
+          ? `Replace every current record with ${imported.length} imported record(s)? This cannot be undone.`
+          : `Add ${imported.length} imported record(s) to the current library?`;
       if (!window.confirm(warning)) return;
-      const response = await fetch("/api/records/import", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ records: imported, mode: importMode, confirmed: true }) });
-      const data = await response.json(); if (!response.ok) throw new Error(data.message || "Could not import the backup.");
-      await loadRecords(filters); setNotice({ type: "success", text: `${data.imported} record(s) ${data.mode === "replace" ? "replaced the library" : "added to the library"}.` });
-    } catch (error) { setNotice({ type: "error", text: error instanceof Error ? error.message : "Could not import this backup." }); }
-    finally { setImporting(false); }
+
+      const response = await fetch("/api/records/import", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          records: imported,
+          costingRecords: costingToImport,
+          mode: importMode,
+          confirmed: true,
+        }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.message || "Could not import the backup.");
+      await Promise.all([loadRecords(filters), loadCostingRecords()]);
+      setNotice({
+        type: "success",
+        text: `${data.imported} winding record(s) ${
+          data.importedCosting ? `and ${data.importedCosting} costing record(s)` : ""
+        } ${data.mode === "replace" ? "replaced the library" : "added to the library"}.`,
+      });
+    } catch (error) {
+      setNotice({ type: "error", text: error instanceof Error ? error.message : "Could not import this backup." });
+    } finally {
+      setImporting(false);
+    }
   };
 
   const savedRecords = useMemo(() => {
@@ -429,40 +593,228 @@ export default function WindingLibrary() {
   const filterActive = Object.values(filters).some((value) => value.trim());
 
   return <div className="app-shell">
-    <aside className="sidebar no-print"><div className="brand-mark"><Image src="/logo.png" alt="EMCO Electrical Logo" width={42} height={42} className="brand-logo-img" priority /><div><strong>{settings.appName}</strong><small>{settings.workshopName}</small></div></div><nav className="side-nav" aria-label="Main navigation">{navItems.map((item) => <button key={item.id} className={view === item.id || (view === "details" && item.id === "saved") ? "nav-link active" : "nav-link"} onClick={() => item.id === "add" ? openCreate() : navigate(item.id)}><Icon name={item.icon} size={19} /><span>{item.label}</span>{item.id === "recycle" && recycleRecords.length > 0 ? <span className="nav-count-badge">{recycleRecords.length}</span> : null}</button>)}</nav><div className="sidebar-note"><Icon name="database" size={20} /><p><strong>Workshop-ready records</strong><span>Stored securely in your library database.</span></p></div></aside>
+    <aside className="sidebar no-print">
+      <div className="brand-mark">
+        <Image src="/logo.png" alt="EMCO Electrical Logo" width={42} height={42} className="brand-logo-img" priority />
+        <div>
+          <strong>{settings.appName}</strong>
+          <small>{settings.workshopName}</small>
+        </div>
+      </div>
+      <nav className="side-nav" aria-label="Main navigation">
+        {navItems.map((item) => (
+          <button
+            key={item.id}
+            className={view === item.id || (view === "details" && item.id === "saved") || (view.includes("costing") && item.id === "costing") ? "nav-link active" : "nav-link"}
+            onClick={() => item.id === "add" ? openCreate() : navigate(item.id)}
+          >
+            <Icon name={item.icon} size={19} />
+            <span>{item.label}</span>
+            {item.id === "recycle" && recycleRecords.length > 0 ? (
+              <span className="nav-count-badge">{recycleRecords.length}</span>
+            ) : null}
+            {item.id === "costing" && costingRecords.length > 0 ? (
+              <span className="nav-count-badge" style={{ background: "#1b6db4" }}>{costingRecords.length}</span>
+            ) : null}
+          </button>
+        ))}
+      </nav>
+      <div className="sidebar-note">
+        <Icon name="database" size={20} />
+        <p>
+          <strong>Workshop-ready records</strong>
+          <span>Stored securely in your library database.</span>
+        </p>
+      </div>
+    </aside>
+
     <main className="main-content">
-      <header className="topbar no-print"><div className="mobile-brand"><Image src="/logo.png" alt="EMCO Electrical Logo" width={36} height={36} className="brand-logo-img" priority /><div><strong>{settings.appName}</strong><small>{settings.workshopName}</small></div></div><div className="topbar-actions"><span className="record-total"><b>{records.length}</b> record{records.length === 1 ? "" : "s"}</span><Button onClick={openCreate}><Icon name="plus" size={18} /> <span>Add record</span></Button></div></header>
-      {notice ? <div className={`notice ${notice.type}`} role="status"><Icon name={notice.type === "success" ? "check" : "close"} size={18} /><span>{notice.text}</span><button aria-label="Dismiss message" onClick={() => setNotice(null)}><Icon name="close" size={16} /></button></div> : null}
-      {view === "search" ? <SearchScreen filters={draftFilters} setFilters={setDraftFilters} onSearch={performSearch} onClear={clearFilters} loading={loading} records={records} filterActive={filterActive} onView={(rec) => showDetails(rec, "search")} onEdit={(rec) => startEdit(rec, "search")} onDelete={deleteRecord} onAdd={openCreate} onShare={shareRecord} /> : null}
-      {view === "saved" ? <SavedScreen records={savedRecords} query={savedQuery} setQuery={setSavedQuery} loading={loading} onView={(rec) => showDetails(rec, "saved")} onEdit={(rec) => startEdit(rec, "saved")} onDelete={deleteRecord} onAdd={openCreate} onShare={shareRecord} /> : null}
-      {view === "add" ? <RecordForm form={form} errors={formErrors} editing={Boolean(editingId)} saving={saving} onChange={changeForm} onSubmit={saveRecord} onCancel={() => navigate(editingId ? (returnView || "saved") : "search")} /> : null}
-      {view === "details" && selected ? <DetailsScreen record={selected} onBack={() => navigate(returnView || "search")} onEdit={() => startEdit(selected, returnView)} onDelete={() => deleteRecord(selected)} onShare={() => shareRecord(selected)} /> : null}
-      {view === "recycle" ? <RecycleScreen records={recycleRecords} loading={recycleLoading} onRestore={restoreRecord} onPermanentDelete={permanentDeleteRecord} onEmpty={clearRecycleBin} /> : null}
-      {view === "settings" ? <SettingsScreen settings={settingsDraft} setSettings={setSettingsDraft} onSave={saveSettings} onExport={exportRecords} importMode={importMode} setImportMode={setImportMode} onImport={importFile} importing={importing} /> : null}
+      <header className="topbar no-print">
+        <div className="mobile-brand">
+          <Image src="/logo.png" alt="EMCO Electrical Logo" width={36} height={36} className="brand-logo-img" priority />
+          <div>
+            <strong>{settings.appName}</strong>
+            <small>{settings.workshopName}</small>
+          </div>
+        </div>
+        <div className="topbar-actions">
+          <span className="record-total">
+            <b>{records.length}</b> record{records.length === 1 ? "" : "s"}
+          </span>
+          <Button onClick={openCreate}>
+            <Icon name="plus" size={18} /> <span>Add record</span>
+          </Button>
+        </div>
+      </header>
+
+      {notice ? (
+        <div className={`notice ${notice.type}`} role="status">
+          <Icon name={notice.type === "success" ? "check" : "close"} size={18} />
+          <span>{notice.text}</span>
+          <button aria-label="Dismiss message" onClick={() => setNotice(null)}>
+            <Icon name="close" size={16} />
+          </button>
+        </div>
+      ) : null}
+
+      {view === "search" ? (
+        <SearchScreen
+          filters={draftFilters}
+          setFilters={setDraftFilters}
+          onSearch={performSearch}
+          onClear={clearFilters}
+          loading={loading}
+          records={records}
+          filterActive={filterActive}
+          onView={(rec) => showDetails(rec, "search")}
+          onEdit={(rec) => startEdit(rec, "search")}
+          onDelete={deleteRecord}
+          onAdd={openCreate}
+          onShare={shareRecord}
+          onCosting={openCostingForMotor}
+        />
+      ) : null}
+
+      {view === "saved" ? (
+        <SavedScreen
+          records={savedRecords}
+          query={savedQuery}
+          setQuery={setSavedQuery}
+          loading={loading}
+          onView={(rec) => showDetails(rec, "saved")}
+          onEdit={(rec) => startEdit(rec, "saved")}
+          onDelete={deleteRecord}
+          onAdd={openCreate}
+          onShare={shareRecord}
+          onCosting={openCostingForMotor}
+        />
+      ) : null}
+
+      {view === "costing" ? (
+        <CostingScreen
+          records={costingRecords}
+          motorRecords={records}
+          settings={settings}
+          loading={costingLoading}
+          onAddCosting={() => {
+            setEditingCostingRecord(null);
+            setView("add-costing");
+          }}
+          onEditCosting={(rec) => {
+            setEditingCostingRecord(rec);
+            setView("edit-costing");
+          }}
+          onDeleteCosting={deleteCosting}
+          onReload={loadCostingRecords}
+        />
+      ) : null}
+
+      {view === "add-costing" || view === "edit-costing" ? (
+        <CostingForm
+          initialRecord={editingCostingRecord}
+          motorRecords={records}
+          saving={saving}
+          onSave={saveCostingRecord}
+          onCancel={() => {
+            setEditingCostingRecord(null);
+            setView("costing");
+          }}
+        />
+      ) : null}
+
+      {view === "add" ? (
+        <RecordForm
+          form={form}
+          errors={formErrors}
+          editing={Boolean(editingId)}
+          saving={saving}
+          onChange={changeForm}
+          onSubmit={saveRecord}
+          onCancel={() => navigate(editingId ? (returnView || "saved") : "search")}
+        />
+      ) : null}
+
+      {view === "details" && selected ? (
+        <DetailsScreen
+          record={selected}
+          onBack={() => navigate(returnView || "search")}
+          onEdit={() => startEdit(selected, returnView)}
+          onDelete={() => deleteRecord(selected)}
+          onShare={() => shareRecord(selected)}
+          onCosting={() => openCostingForMotor(selected)}
+        />
+      ) : null}
+
+      {view === "recycle" ? (
+        <RecycleScreen
+          records={recycleRecords}
+          loading={recycleLoading}
+          onRestore={restoreRecord}
+          onPermanentDelete={permanentDeleteRecord}
+          onEmpty={clearRecycleBin}
+        />
+      ) : null}
+
+      {view === "settings" ? (
+        <SettingsScreen
+          settings={settingsDraft}
+          setSettings={setSettingsDraft}
+          onSave={saveSettings}
+          onExport={exportRecords}
+          importMode={importMode}
+          setImportMode={setImportMode}
+          onImport={importFile}
+          importing={importing}
+        />
+      ) : null}
     </main>
-    <nav className="mobile-nav no-print" aria-label="Mobile navigation">{navItems.map((item) => <button key={item.id} className={view === item.id ? "active" : ""} onClick={() => item.id === "add" ? openCreate() : navigate(item.id)}><Icon name={item.icon} size={19} /><span>{item.id === "settings" ? "Settings" : item.id === "search" ? "Search" : item.id === "saved" ? "Saved" : item.id === "recycle" ? "Recycle" : "Add"}</span></button>)}</nav>
+
+    <nav className="mobile-nav no-print" aria-label="Mobile navigation">
+      {navItems.map((item) => (
+        <button
+          key={item.id}
+          className={view === item.id || (view.includes("costing") && item.id === "costing") ? "active" : ""}
+          onClick={() => item.id === "add" ? openCreate() : navigate(item.id)}
+        >
+          <Icon name={item.icon} size={19} />
+          <span>
+            {item.id === "settings"
+              ? "Settings"
+              : item.id === "search"
+              ? "Search"
+              : item.id === "saved"
+              ? "Saved"
+              : item.id === "costing"
+              ? "Costing"
+              : item.id === "recycle"
+              ? "Recycle"
+              : "Add"}
+          </span>
+        </button>
+      ))}
+    </nav>
   </div>;
 }
 
-function SearchScreen({ filters, setFilters, onSearch, onClear, loading, records, filterActive, onView, onEdit, onDelete, onAdd, onShare }: { filters: FilterState; setFilters: (value: FilterState) => void; onSearch: (event?: FormEvent) => Promise<void>; onClear: () => Promise<void>; loading: boolean; records: WindingRecord[]; filterActive: boolean; onView: (record: WindingRecord) => void; onEdit: (record: WindingRecord) => void; onDelete: (record: WindingRecord) => void; onAdd: () => void; onShare: (record: WindingRecord) => void; }) {
+function SearchScreen({ filters, setFilters, onSearch, onClear, loading, records, filterActive, onView, onEdit, onDelete, onAdd, onShare, onCosting }: { filters: FilterState; setFilters: (value: FilterState) => void; onSearch: (event?: FormEvent) => Promise<void>; onClear: () => Promise<void>; loading: boolean; records: WindingRecord[]; filterActive: boolean; onView: (record: WindingRecord) => void; onEdit: (record: WindingRecord) => void; onDelete: (record: WindingRecord) => void; onAdd: () => void; onShare: (record: WindingRecord) => void; onCosting: (record: WindingRecord) => void; }) {
   const setFilter = (name: keyof FilterState, value: string) => setFilters({ ...filters, [name]: value });
   return <>
     <section className="page-intro no-print"><div><p className="eyebrow"><span className="live-dot" /> Library search</p><h1><span className="hero-blue">EMCO ELECTRICAL</span><br /><span className="hero-red">motor winding data</span></h1><p>Search by motor specification or machine name. Every matching winding record stays separate.</p></div><Button className="intro-add" onClick={onAdd}><Icon name="plus" size={18} /> Add new record</Button></section>
     <section className="search-panel no-print" aria-label="Search motor records"><form onSubmit={onSearch}><div className="quick-search"><Icon name="search" size={20} /><input list="search-machine-options" value={filters.q} onChange={(event) => setFilter("q", event.target.value)} placeholder="Search company, machine, frame, HP or RPM" aria-label="Search all record fields" /><datalist id="search-machine-options">{records.map((record) => <option key={record.id} value={record.companyName} />)}</datalist></div><div className="filter-grid"><label className="filter-field"><span>Frame size</span><input list="frame-options" value={filters.frameSize} onChange={(event) => setFilter("frameSize", event.target.value)} inputMode="numeric" placeholder="Any frame" /><datalist id="frame-options">{FRAME_SIZES.map((option) => <option key={option} value={option} />)}</datalist></label><label className="filter-field"><span>HP</span><input list="hp-options" value={filters.hp} onChange={(event) => setFilter("hp", event.target.value)} inputMode="decimal" placeholder="Any HP" /><datalist id="hp-options">{HP_VALUES.map((option) => <option key={option} value={option} />)}</datalist></label><label className="filter-field"><span>Phase</span><input list="phase-options" value={filters.phase} onChange={(event) => setFilter("phase", event.target.value)} inputMode="numeric" placeholder="Any phase" /><datalist id="phase-options">{PHASE_VALUES.map((option) => <option key={option} value={option} label={`${option} phase`} />)}</datalist></label><label className="filter-field"><span>RPM</span><input list="rpm-options" value={filters.rpm} onChange={(event) => setFilter("rpm", event.target.value)} inputMode="numeric" placeholder="Any RPM" /><datalist id="rpm-options">{RPM_VALUES.map((option) => <option key={option} value={option} />)}</datalist></label><div className="filter-actions"><Button type="submit"><Icon name="search" size={18} /> Search</Button><Button type="button" variant="secondary" onClick={() => void onClear()}>Clear filters</Button></div></div></form></section>
-    <section className="results-section"><div className="results-heading"><div><p className="eyebrow">Results</p><h2>{loading ? "Searching records…" : `${records.length} matching record${records.length === 1 ? "" : "s"}`}</h2></div>{filterActive ? <span className="filter-chip"><Icon name="sliders" size={15} /> Filters active</span> : <span className="all-records">Showing all saved records</span>}</div>{loading ? <div className="loading-card"><span className="spinner" /> Loading your library…</div> : records.length ? <div className="record-list">{records.map((record) => <RecordCard key={record.id} record={record} onView={() => onView(record)} onEdit={() => onEdit(record)} onDelete={() => onDelete(record)} onShare={() => onShare(record)} />)}</div> : <EmptyState filtered={filterActive} onAdd={onAdd} onClear={onClear} />}</section>
+    <section className="results-section"><div className="results-heading"><div><p className="eyebrow">Results</p><h2>{loading ? "Searching records…" : `${records.length} matching record${records.length === 1 ? "" : "s"}`}</h2></div>{filterActive ? <span className="filter-chip"><Icon name="sliders" size={15} /> Filters active</span> : <span className="all-records">Showing all saved records</span>}</div>{loading ? <div className="loading-card"><span className="spinner" /> Loading your library…</div> : records.length ? <div className="record-list">{records.map((record) => <RecordCard key={record.id} record={record} onView={() => onView(record)} onEdit={() => onEdit(record)} onDelete={() => onDelete(record)} onShare={() => onShare(record)} onCosting={() => onCosting(record)} />)}</div> : <EmptyState filtered={filterActive} onAdd={onAdd} onClear={onClear} />}</section>
   </>;
 }
 
-function RecordCard({ record, onView, onEdit, onDelete, onShare }: { record: WindingRecord; onView: () => void; onEdit: () => void; onDelete: () => void; onShare: () => void }) {
-  return <article className="record-card"><div className="record-card-top"><div><p className="record-type">Motor winding record</p><h3>{record.companyName}</h3></div><span className="frame-badge">Frame {record.frameSize}</span></div><div className="metric-row"><span><b>{record.hp} HP</b></span><span>{displayPhase(record.phase)}</span><span>{record.rpm} RPM</span></div>{record.description ? <p className="card-description">{record.description}</p> : null}<div className="record-specs"><Spec label="OD" value={record.od} /><Spec label="ID" value={record.idDimension} /><Spec label="E length" value={record.eLength} /><Spec label="Slot" value={record.slot} /><Spec label="R. slot" value={record.rSlot} /></div><div className="card-actions"><Button variant="secondary" onClick={onView}>View details <Icon name="arrow" size={17} /></Button><button className="icon-text-button share-text" onClick={onShare}><Icon name="share" size={17} /> Share</button><button className="icon-text-button" onClick={onEdit}><Icon name="edit" size={17} /> Edit</button><button className="icon-text-button danger-text" onClick={onDelete}><Icon name="trash" size={17} /> Delete</button></div></article>;
+function RecordCard({ record, onView, onEdit, onDelete, onShare, onCosting }: { record: WindingRecord; onView: () => void; onEdit: () => void; onDelete: () => void; onShare: () => void; onCosting?: () => void; }) {
+  return <article className="record-card"><div className="record-card-top"><div><p className="record-type">Motor winding record</p><h3>{record.companyName}</h3></div><span className="frame-badge">Frame {record.frameSize}</span></div><div className="metric-row"><span><b>{record.hp} HP</b></span><span>{displayPhase(record.phase)}</span><span>{record.rpm} RPM</span></div>{record.description ? <p className="card-description">{record.description}</p> : null}<div className="record-specs"><Spec label="OD" value={record.od} /><Spec label="ID" value={record.idDimension} /><Spec label="E length" value={record.eLength} /><Spec label="Slot" value={record.slot} /><Spec label="R. slot" value={record.rSlot} /></div><div className="card-actions"><Button variant="secondary" onClick={onView}>View details <Icon name="arrow" size={17} /></Button>{onCosting ? <button className="icon-text-button costing-text" onClick={onCosting} title="View or create costing sheet"><Icon name="costing" size={17} /> Costing</button> : null}<button className="icon-text-button share-text" onClick={onShare}><Icon name="share" size={17} /> Share</button><button className="icon-text-button" onClick={onEdit}><Icon name="edit" size={17} /> Edit</button><button className="icon-text-button danger-text" onClick={onDelete}><Icon name="trash" size={17} /> Delete</button></div></article>;
 }
 
 function EmptyState({ filtered, onAdd, onClear }: { filtered: boolean; onAdd: () => void; onClear: () => Promise<void> }) {
   return <div className="empty-state"><div className="empty-icon"><Icon name="search" size={30} /></div><h3>{filtered ? "No matching winding records" : "Your winding library is ready"}</h3><p>{filtered ? "Try clearing a filter or search with a different motor specification." : "Add the first motor record to build a reliable workshop reference."}</p><div>{filtered ? <Button variant="secondary" onClick={() => void onClear()}>Clear filters</Button> : null}<Button onClick={onAdd}><Icon name="plus" size={18} /> Add new record</Button></div></div>;
 }
 
-function SavedScreen({ records, query, setQuery, loading, onView, onEdit, onDelete, onAdd, onShare }: { records: WindingRecord[]; query: string; setQuery: (value: string) => void; loading: boolean; onView: (record: WindingRecord) => void; onEdit: (record: WindingRecord) => void; onDelete: (record: WindingRecord) => void; onAdd: () => void; onShare: (record: WindingRecord) => void; }) {
-  return <><section className="page-intro compact no-print"><div><p className="eyebrow">Saved records</p><h1>Your workshop library.</h1><p>Browse every saved motor; similar frame sizes remain individual records.</p></div><Button onClick={onAdd}><Icon name="plus" size={18} /> Add record</Button></section><section className="saved-toolbar no-print"><div className="quick-search"><Icon name="search" size={20} /><input list="saved-machine-options" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Filter saved records" aria-label="Filter saved records" /><datalist id="saved-machine-options">{records.map((record) => <option key={record.id} value={record.companyName} />)}</datalist></div><span>{records.length} record{records.length === 1 ? "" : "s"}</span></section><section className="results-section">{loading ? <div className="loading-card"><span className="spinner" /> Loading your library…</div> : records.length ? <div className="record-list">{records.map((record) => <RecordCard key={record.id} record={record} onView={() => onView(record)} onEdit={() => onEdit(record)} onDelete={() => onDelete(record)} onShare={() => onShare(record)} />)}</div> : <EmptyState filtered={Boolean(query)} onAdd={onAdd} onClear={async () => setQuery("")} />}</section></>;
+function SavedScreen({ records, query, setQuery, loading, onView, onEdit, onDelete, onAdd, onShare, onCosting }: { records: WindingRecord[]; query: string; setQuery: (value: string) => void; loading: boolean; onView: (record: WindingRecord) => void; onEdit: (record: WindingRecord) => void; onDelete: (record: WindingRecord) => void; onAdd: () => void; onShare: (record: WindingRecord) => void; onCosting: (record: WindingRecord) => void; }) {
+  return <><section className="page-intro compact no-print"><div><p className="eyebrow">Saved records</p><h1>Your workshop library.</h1><p>Browse every saved motor; similar frame sizes remain individual records.</p></div><Button onClick={onAdd}><Icon name="plus" size={18} /> Add record</Button></section><section className="saved-toolbar no-print"><div className="quick-search"><Icon name="search" size={20} /><input list="saved-machine-options" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Filter saved records" aria-label="Filter saved records" /><datalist id="saved-machine-options">{records.map((record) => <option key={record.id} value={record.companyName} />)}</datalist></div><span>{records.length} record{records.length === 1 ? "" : "s"}</span></section><section className="results-section">{loading ? <div className="loading-card"><span className="spinner" /> Loading your library…</div> : records.length ? <div className="record-list">{records.map((record) => <RecordCard key={record.id} record={record} onView={() => onView(record)} onEdit={() => onEdit(record)} onDelete={() => onDelete(record)} onShare={() => onShare(record)} onCosting={() => onCosting(record)} />)}</div> : <EmptyState filtered={Boolean(query)} onAdd={onAdd} onClear={async () => setQuery("")} />}</section></>;
 }
 
 function RecordForm({ form, errors, editing, saving, onChange, onSubmit, onCancel }: { form: RecordInput; errors: Partial<Record<RecordField, string>>; editing: boolean; saving: boolean; onChange: (name: RecordField, value: string) => void; onSubmit: (event?: FormEvent<HTMLFormElement>, addAnother?: boolean) => Promise<void>; onCancel: () => void; }) {
@@ -509,15 +861,82 @@ function RecordForm({ form, errors, editing, saving, onChange, onSubmit, onCance
   </form></>;
 }
 
-function DetailsScreen({ record, onBack, onEdit, onDelete, onShare }: { record: WindingRecord; onBack: () => void; onEdit: () => void; onDelete: () => void; onShare: () => void; }) {
+function DetailsScreen({ record, onBack, onEdit, onDelete, onShare, onCosting }: { record: WindingRecord; onBack: () => void; onEdit: () => void; onDelete: () => void; onShare: () => void; onCosting: () => void; }) {
   const threePhase = isThreePhase(record.phase);
-  return <article className="detail-page"><div className="detail-toolbar no-print"><Button variant="ghost" onClick={onBack}>← Back to records</Button><div><Button variant="secondary" onClick={onShare}><Icon name="share" size={17} /> Share</Button><Button variant="secondary" onClick={() => window.print()}><Icon name="print" size={17} /> Print / Save as PDF</Button><Button onClick={onEdit}><Icon name="edit" size={17} /> Edit</Button><Button variant="danger" onClick={onDelete}><Icon name="trash" size={17} /> Delete</Button></div></div><header className="detail-head"><div><p className="eyebrow">Motor winding record</p><h1>{record.companyName}</h1><p>Last updated {formatDate(record.updatedAt)}</p></div><span className="frame-badge large">Frame {record.frameSize}</span></header><div className="detail-summary"><span><b>{record.hp} HP</b></span><span>{displayPhase(record.phase)}</span><span>{record.rpm} RPM</span></div><div className={`detail-grid ${threePhase ? "three-phase-grid" : ""}`}><DetailSection title="Motor information"><Spec label="Company Name" value={record.companyName} /><Spec label="Description" value={record.description} /><Spec label="Frame Size" value={record.frameSize} /><Spec label="HP" value={record.hp} /><Spec label="Phase" value={displayPhase(record.phase)} /><Spec label="RPM" value={record.rpm} /></DetailSection><DetailSection title="Dimensions & slots"><Spec label="OD" value={record.od} /><Spec label="ID" value={record.idDimension} /><Spec label="E Length" value={record.eLength} /><Spec label="Slot" value={record.slot} /><Spec label="R. Slot" value={record.rSlot} /></DetailSection><DetailSection title={threePhase ? "Coil data" : "Running coil"} className={threePhase ? "three-phase-coil" : ""}><Spec label="Pitch" value={record.runningPitch} /><Spec label="Turns" value={record.runningTurns} /><Spec label="SWG" value={record.runningSwg} /><Spec label="Weight" value={record.runningWeight} /><Spec label="Connection" value={record.runningConnection} /></DetailSection>{!threePhase ? (<DetailSection title="Starting coil"><Spec label="Pitch" value={record.startingPitch} /><Spec label="Turns" value={record.startingTurns} /><Spec label="SWG" value={record.startingSwg} /><Spec label="Weight" value={record.startingWeight} /><Spec label="Connection" value={record.startingConnection} /></DetailSection>) : null}{!threePhase ? (<DetailSection title="Capacitors" className="capacitor-section"><Spec label="Starting Capacitor" value={record.startingCapacitor} /><Spec label="Running Capacitor" value={record.runningCapacitor} /></DetailSection>) : null}</div><footer className="detail-footer">Record created {formatDate(record.createdAt)} <span>•</span> Unique library ID {record.id}</footer></article>;
+  return <article className="detail-page">
+    <div className="detail-toolbar no-print">
+      <Button variant="ghost" onClick={onBack}>← Back to records</Button>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+        <Button variant="secondary" onClick={onCosting}><Icon name="costing" size={17} /> Motor Costing</Button>
+        <Button variant="secondary" onClick={onShare}><Icon name="share" size={17} /> Share</Button>
+        <Button variant="secondary" onClick={() => window.print()}><Icon name="print" size={17} /> Print / Save as PDF</Button>
+        <Button onClick={onEdit}><Icon name="edit" size={17} /> Edit</Button>
+        <Button variant="danger" onClick={onDelete}><Icon name="trash" size={17} /> Delete</Button>
+      </div>
+    </div>
+    <header className="detail-head">
+      <div>
+        <p className="eyebrow">Motor winding record</p>
+        <h1>{record.companyName}</h1>
+        <p>Last updated {formatDate(record.updatedAt)}</p>
+      </div>
+      <span className="frame-badge large">Frame {record.frameSize}</span>
+    </header>
+    <div className="detail-summary">
+      <span><b>{record.hp} HP</b></span>
+      <span>{displayPhase(record.phase)}</span>
+      <span>{record.rpm} RPM</span>
+    </div>
+    <div className={`detail-grid ${threePhase ? "three-phase-grid" : ""}`}>
+      <DetailSection title="Motor information">
+        <Spec label="Company Name" value={record.companyName} />
+        <Spec label="Description" value={record.description} />
+        <Spec label="Frame Size" value={record.frameSize} />
+        <Spec label="HP" value={record.hp} />
+        <Spec label="Phase" value={displayPhase(record.phase)} />
+        <Spec label="RPM" value={record.rpm} />
+      </DetailSection>
+      <DetailSection title="Dimensions & slots">
+        <Spec label="OD" value={record.od} />
+        <Spec label="ID" value={record.idDimension} />
+        <Spec label="E Length" value={record.eLength} />
+        <Spec label="Slot" value={record.slot} />
+        <Spec label="R. Slot" value={record.rSlot} />
+      </DetailSection>
+      <DetailSection title={threePhase ? "Coil data" : "Running coil"} className={threePhase ? "three-phase-coil" : ""}>
+        <Spec label="Pitch" value={record.runningPitch} />
+        <Spec label="Turns" value={record.runningTurns} />
+        <Spec label="SWG" value={record.runningSwg} />
+        <Spec label="Weight" value={record.runningWeight} />
+        <Spec label="Connection" value={record.runningConnection} />
+      </DetailSection>
+      {!threePhase ? (
+        <DetailSection title="Starting coil">
+          <Spec label="Pitch" value={record.startingPitch} />
+          <Spec label="Turns" value={record.startingTurns} />
+          <Spec label="SWG" value={record.startingSwg} />
+          <Spec label="Weight" value={record.startingWeight} />
+          <Spec label="Connection" value={record.startingConnection} />
+        </DetailSection>
+      ) : null}
+      {!threePhase ? (
+        <DetailSection title="Capacitors" className="capacitor-section">
+          <Spec label="Starting Capacitor" value={record.startingCapacitor} />
+          <Spec label="Running Capacitor" value={record.runningCapacitor} />
+        </DetailSection>
+      ) : null}
+    </div>
+
+    <footer className="detail-footer">
+      Record created {formatDate(record.createdAt)} <span>•</span> Unique library ID {record.id}
+    </footer>
+  </article>;
 }
 
 function DetailSection({ title, children, className = "" }: { title: string; children: ReactNode; className?: string }) { return <section className={`detail-section ${className}`}><h2>{title}</h2><div>{children}</div></section>; }
 
-function SettingsScreen({ settings, setSettings, onSave, onExport, importMode, setImportMode, onImport, importing }: { settings: Settings; setSettings: (settings: Settings) => void; onSave: (event: FormEvent) => void; onExport: (format: "json" | "csv") => void; importMode: "append" | "replace"; setImportMode: (value: "append" | "replace") => void; onImport: (event: ChangeEvent<HTMLInputElement>) => void; importing: boolean; }) {
-  return <><section className="page-intro compact no-print"><div><p className="eyebrow">Settings & data backup</p><h1>Keep the library yours.</h1><p>Set the workshop identity, then export or restore the winding database whenever you need.</p></div></section><div className="settings-layout"><form className="settings-card" onSubmit={onSave}><div className="settings-card-head"><div className="setting-icon"><Icon name="settings" size={21} /></div><div><h2>Workshop identity</h2><p>Shown in the navigation and printed records.</p></div></div><label className="field"><span className="field-label">App name <b>Required</b></span><input className="input" value={settings.appName} maxLength={120} onChange={(event) => setSettings({ ...settings, appName: event.target.value })} placeholder="Motor Winding Library" /></label><label className="field"><span className="field-label">Workshop / company name <b>Required</b></span><input className="input" value={settings.workshopName} maxLength={160} onChange={(event) => setSettings({ ...settings, workshopName: event.target.value })} placeholder="Your workshop name" /></label><Button type="submit">Save settings</Button></form><section className="settings-card"><div className="settings-card-head"><div className="setting-icon"><Icon name="download" size={21} /></div><div><h2>Export backup</h2><p>Download every saved winding record for safekeeping.</p></div></div><div className="backup-buttons"><Button variant="secondary" onClick={() => onExport("json")}><Icon name="download" size={17} /> Export JSON</Button><Button variant="secondary" onClick={() => onExport("csv")}><Icon name="download" size={17} /> Export CSV</Button></div><p className="backup-note">JSON is best for full restore. CSV is useful for sharing or spreadsheet review.</p></section><section className="settings-card import-card"><div className="settings-card-head"><div className="setting-icon"><Icon name="upload" size={21} /></div><div><h2>Restore / import</h2><p>Accepts Motor Winding Library JSON backups or CSV exports.</p></div></div><label className="mode-choice"><input type="radio" checked={importMode === "append"} onChange={() => setImportMode("append")} /><span><b>Add to current library</b><small>Keep existing records and add imported records.</small></span></label><label className="mode-choice warning"><input type="radio" checked={importMode === "replace"} onChange={() => setImportMode("replace")} /><span><b>Replace current library</b><small>Deletes current records after confirmation.</small></span></label><label className={importing ? "file-button disabled" : "file-button"}><Icon name="upload" size={18} /> {importing ? "Importing…" : "Choose backup file"}<input type="file" accept=".json,.csv,application/json,text/csv" disabled={importing} onChange={onImport} /></label></section></div></>;
+function SettingsScreen({ settings, setSettings, onSave, onExport, importMode, setImportMode, onImport, importing }: { settings: Settings; setSettings: (settings: Settings) => void; onSave: (event: FormEvent) => void; onExport: (format: "json" | "csv" | "costing-csv") => void; importMode: "append" | "replace"; setImportMode: (value: "append" | "replace") => void; onImport: (event: ChangeEvent<HTMLInputElement>) => void; importing: boolean; }) {
+  return <><section className="page-intro compact no-print"><div><p className="eyebrow">Settings & data backup</p><h1>Keep the library yours.</h1><p>Set the workshop identity, then export or restore the winding database whenever you need.</p></div></section><div className="settings-layout"><form className="settings-card" onSubmit={onSave}><div className="settings-card-head"><div className="setting-icon"><Icon name="settings" size={21} /></div><div><h2>Workshop identity</h2><p>Shown in the navigation and printed records.</p></div></div><label className="field"><span className="field-label">App name <b>Required</b></span><input className="input" value={settings.appName} maxLength={120} onChange={(event) => setSettings({ ...settings, appName: event.target.value })} placeholder="Motor Winding Library" /></label><label className="field"><span className="field-label">Workshop / company name <b>Required</b></span><input className="input" value={settings.workshopName} maxLength={160} onChange={(event) => setSettings({ ...settings, workshopName: event.target.value })} placeholder="Your workshop name" /></label><Button type="submit">Save settings</Button></form><section className="settings-card"><div className="settings-card-head"><div className="setting-icon"><Icon name="download" size={21} /></div><div><h2>Export backup</h2><p>Download every saved winding record for safekeeping.</p></div></div><div className="backup-buttons"><Button variant="secondary" onClick={() => onExport("json")}><Icon name="download" size={17} /> Export JSON</Button><Button variant="secondary" onClick={() => onExport("csv")}><Icon name="download" size={17} /> Export CSV</Button></div><div style={{ marginTop: 8 }}><Button variant="secondary" style={{ width: "100%" }} onClick={() => onExport("costing-csv")}><Icon name="costing" size={17} /> Export Costing CSV</Button></div><p className="backup-note">JSON is best for full restore. CSV is useful for sharing or spreadsheet review.</p><div style={{ marginTop: 12, padding: "10px 12px", background: "#f8fafc", borderRadius: 8, fontSize: "0.82rem", color: "#475569", border: "1px solid #e2e8f0", lineHeight: 1.45 }}><strong style={{ color: "#1e293b", display: "block", marginBottom: 3 }}>Chrome Export vs &quot;Save Offline&quot;:</strong>Clicking the export buttons above downloads real backup files (<code>.json</code> or <code>.csv</code>). If Chrome prompts to <em>&quot;Save page for offline&quot;</em>, that is a browser shortcut saving an HTML snapshot rather than exporting the database records.</div></section><section className="settings-card import-card"><div className="settings-card-head"><div className="setting-icon"><Icon name="upload" size={21} /></div><div><h2>Restore / import</h2><p>Accepts Motor Winding Library JSON backups or CSV exports.</p></div></div><label className="mode-choice"><input type="radio" checked={importMode === "append"} onChange={() => setImportMode("append")} /><span><b>Add to current library</b><small>Keep existing records and add imported records.</small></span></label><label className="mode-choice warning"><input type="radio" checked={importMode === "replace"} onChange={() => setImportMode("replace")} /><span><b>Replace current library</b><small>Deletes current records after confirmation.</small></span></label><label className={importing ? "file-button disabled" : "file-button"}><Icon name="upload" size={18} /> {importing ? "Importing…" : "Choose backup file"}<input type="file" accept=".json,.csv,application/json,text/csv" disabled={importing} onChange={onImport} /></label></section></div></>;
 }
 
 function RecycleScreen({

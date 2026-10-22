@@ -27,9 +27,43 @@ export const windingRecords = pgTable("winding_records", {
   startingConnection: varchar("starting_connection", { length: 120 }).notNull().default(""),
   startingCapacitor: varchar("starting_capacitor", { length: 160 }).notNull().default(""),
   runningCapacitor: varchar("running_capacitor", { length: 160 }).notNull().default(""),
+  drawingData: text("drawing_data").notNull().default(""),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   deletedAt: timestamp("deleted_at", { withTimezone: true }),
+});
+
+export const motorCostingRecords = pgTable("motor_costing_records", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  motorRecordId: uuid("motor_record_id"),
+  companyName: text("company_name").notNull(),
+  jobName: text("job_name").notNull().default(""),
+  jobDate: varchar("job_date", { length: 60 }).notNull().default(""),
+  notes: text("notes").notNull().default(""),
+  frameSize: varchar("frame_size", { length: 80 }).notNull().default(""),
+  hp: varchar("hp", { length: 80 }).notNull().default(""),
+  phase: varchar("phase", { length: 80 }).notNull().default(""),
+  rpm: varchar("rpm", { length: 80 }).notNull().default(""),
+  bodyLength: varchar("body_length", { length: 80 }).notNull().default(""),
+  frontBearingCover: varchar("front_bearing_cover", { length: 80 }).notNull().default(""),
+  backBearingCover: varchar("back_bearing_cover", { length: 80 }).notNull().default(""),
+  tbfcLabel: varchar("tbfc_label", { length: 100 }).notNull().default("T.B.F.C."),
+  costItems: text("cost_items").notNull().default("{}"),
+  totalAmount: varchar("total_amount", { length: 40 }).notNull().default("0"),
+  adjustmentHistory: text("adjustment_history").notNull().default("[]"),
+  drawingData: text("drawing_data").notNull().default(""),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  deletedAt: timestamp("deleted_at", { withTimezone: true }),
+});
+
+export const drawingTemplates = pgTable("drawing_templates", {
+  id: varchar("id", { length: 120 }).primaryKey(),
+  name: varchar("name", { length: 200 }).notNull(),
+  description: text("description").notNull().default(""),
+  data: text("data").notNull().default("{}"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
 export const appSettings = pgTable("app_settings", {
@@ -38,3 +72,4 @@ export const appSettings = pgTable("app_settings", {
   workshopName: varchar("workshop_name", { length: 160 }).notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
+

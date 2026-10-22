@@ -1,10 +1,12 @@
-import { bulkImportRecords } from "@/db";
-import { coerceRecordInput, validateRecord } from "@/lib/winding";
+import { bulkImportCostingRecords, bulkImportRecords } from "@/db";
+import { coerceRecordInput, emptyCostItems, validateRecord, type MotorCostingRecord } from "@/lib/winding";
 
 export const runtime = "nodejs";
 
 type ImportBody = {
   records?: unknown;
+  costingRecords?: unknown;
+  drawingTemplates?: unknown;
   mode?: "append" | "replace";
   confirmed?: boolean;
 };
@@ -40,7 +42,46 @@ export async function POST(request: Request) {
     }
 
     const imported = await bulkImportRecords(parsed, mode);
-    return Response.json({ ok: true, imported, mode });
+
+    let importedCosting = 0;
+    if (Array.isArray(body.costingRecords) && body.costingRecords.length > 0) {
+      const parsedCosting: MotorCostingRecord[] = body.costingRecords.map((item) => {
+        const obj = (item && typeof item === "object" ? item : {}) as Partial<MotorCostingRecord>;
+        return {
+          id: obj.id || "",
+          motorRecordId: obj.motorRecordId || null,
+          companyName: String(obj.companyName || "Untitled Costing"),
+          jobName: String(obj.jobName || ""),
+          jobDate: String(obj.jobDate || ""),
+          notes: String(obj.notes || ""),
+          frameSize: String(obj.frameSize || ""),
+          hp: String(obj.hp || ""),
+          phase: String(obj.phase || ""),
+          rpm: String(obj.rpm || ""),
+          bodyLength: String(obj.bodyLength || ""),
+          frontBearingCover: String(obj.frontBearingCover || ""),
+          backBearingCover: String(obj.backBearingCover || ""),
+          tbfcLabel: String(obj.tbfcLabel || "T.B.F.C."),
+          items: obj.items && typeof obj.items === "object" ? { ...emptyCostItems(), ...obj.items } : emptyCostItems(),
+          totalAmount: Number(obj.totalAmount) || 0,
+          adjustmentHistory: Array.isArray(obj.adjustmentHistory) ? obj.adjustmentHistory : [],
+          drawing: obj.drawing || (obj.drawingData ? JSON.parse(obj.drawingData) : null),
+          drawingData: obj.drawingData || (obj.drawing ? JSON.stringify(obj.drawing) : ""),
+          createdAt: String(obj.createdAt || new Date().toISOString()),
+          updatedAt: String(obj.updatedAt || new Date().toISOString()),
+          deletedAt: obj.deletedAt ? String(obj.deletedAt) : null,
+        };
+      });
+      importedCosting = await bulkImportCostingRecords(parsedCosting, mode);
+    }
+
+    let importedTemplates = 0;
+    if (Array.isArray(body.drawingTemplates) && body.drawingTemplates.length > 0) {
+      const { bulkImportDrawingTemplates } = await import("@/db");
+      importedTemplates = await bulkImportDrawingTemplates(body.drawingTemplates as any, mode);
+    }
+
+    return Response.json({ ok: true, imported, importedCosting, importedTemplates, mode });
   } catch {
     return Response.json({ message: "That backup could not be read. Use a valid Motor Winding Library JSON file." }, { status: 400 });
   }
