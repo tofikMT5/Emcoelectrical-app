@@ -114,10 +114,8 @@ export function ShaftDrawingSVG({
             const subText = rawLabel ? rawLabel : "";
 
             // Keep pill compact to prevent overlap with adjacent steps
-            const stepWidth = x === 100 ? 80 : x === 175 ? 70 : x === 240 ? 60 : x === 420 ? 300 : x === 600 ? 60 : x === 660 ? 60 : 50;
-            const maxW = Math.min(stepWidth - 6, 76);
             const textChars = Math.max(displayText.length, subText.length);
-            const pillWidth = Math.max(44, Math.min(maxW, textChars * 6.5 + 10));
+            const pillWidth = Math.max(48, Math.min(76, textChars * 6.5 + 10));
             const pillHeight = subText ? 22 : 16;
 
             return (
@@ -152,7 +150,7 @@ export function ShaftDrawingSVG({
                   strokeWidth="1"
                 />
 
-                {/* Technical white pill centered at red square position */}
+                {/* Technical white pill centered at step center */}
                 <rect
                   x={x - pillWidth / 2}
                   y={midY - pillHeight / 2}
@@ -198,18 +196,18 @@ export function ShaftDrawingSVG({
           }
 
           const offset = el.offset || -30;
-
-          // Dimension line is shifted by offset perpendicular to profile
-          const dimY = el.y1 + offset;
+          const isBelow = offset > 0;
+          const baseY = isBelow ? Math.max(el.y1, el.y2) : Math.min(el.y1, el.y2);
+          const dimY = baseY + offset;
           const minX = Math.min(el.x1, el.x2);
           const maxX = Math.max(el.x1, el.x2);
           const midX = (minX + maxX) / 2;
 
-          // Extension lines from profile points towards dimension line
-          const ext1Y1 = Math.min(el.y1, dimY) - 4;
-          const ext1Y2 = Math.max(el.y1, dimY) + 4;
-          const ext2Y1 = Math.min(el.y2, dimY) - 4;
-          const ext2Y2 = Math.max(el.y2, dimY) + 4;
+          // Extension lines start cleanly at exact profile vertex anchors
+          const ext1Y1 = isBelow ? el.y1 : dimY - 4;
+          const ext1Y2 = isBelow ? dimY + 4 : el.y1;
+          const ext2Y1 = isBelow ? el.y2 : dimY - 4;
+          const ext2Y2 = isBelow ? dimY + 4 : el.y2;
 
           const trimmedVal = rawValue.trim();
           const displayText = trimmedVal
@@ -220,7 +218,7 @@ export function ShaftDrawingSVG({
 
           return (
             <g key={el.id} className="dimension-group dimension-horizontal">
-              {/* Extension lines at both ends */}
+              {/* Extension lines at both ends anchored to profile corners */}
               <line
                 x1={el.x1}
                 y1={ext1Y1}
