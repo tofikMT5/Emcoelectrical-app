@@ -159,10 +159,17 @@ async function readLocalData(): Promise<StorageData> {
         : [...DEFAULT_SHAFT_TEMPLATES];
 
     for (const def of DEFAULT_SHAFT_TEMPLATES) {
-      const exists = loadedTemplates.some(
+      const idx = loadedTemplates.findIndex(
         (t) => t.id === def.id || t.name.toLowerCase().trim() === def.name.toLowerCase().trim(),
       );
-      if (!exists) {
+      if (idx !== -1) {
+        loadedTemplates[idx] = {
+          ...loadedTemplates[idx],
+          elements: def.elements,
+          viewBoxWidth: def.viewBoxWidth,
+          viewBoxHeight: def.viewBoxHeight,
+        };
+      } else {
         loadedTemplates.push(def);
       }
     }
@@ -589,6 +596,15 @@ function serializePgCostingRecord(row: typeof motorCostingRecords.$inferSelect):
       const parsed = typeof rawDrawing === "string" ? JSON.parse(rawDrawing) : rawDrawing;
       if (parsed && typeof parsed === "object") {
         drawing = parsed as ShaftDrawing;
+        const tId = drawing.templateId;
+        if (tId) {
+          const defTpl = DEFAULT_SHAFT_TEMPLATES.find((t) => t.id === tId);
+          if (defTpl && drawing) {
+            drawing.elements = JSON.parse(JSON.stringify(defTpl.elements));
+            drawing.viewBoxWidth = defTpl.viewBoxWidth;
+            drawing.viewBoxHeight = defTpl.viewBoxHeight;
+          }
+        }
       }
     } catch {
       // fallback
@@ -1205,10 +1221,25 @@ export async function getDrawingTemplates(): Promise<ShaftDrawingTemplate[]> {
 
       let hasNewSeed = false;
       for (const def of DEFAULT_SHAFT_TEMPLATES) {
-        const exists = rows.some(
+        const existing = rows.find(
           (r) => r.id === def.id || r.name.toLowerCase().trim() === def.name.toLowerCase().trim(),
         );
-        if (!exists) {
+        if (existing) {
+          try {
+            await db
+              .update(drawingTemplates)
+              .set({
+                data: JSON.stringify({
+                  elements: def.elements,
+                  viewBoxWidth: def.viewBoxWidth,
+                  viewBoxHeight: def.viewBoxHeight,
+                }),
+                updatedAt: new Date(),
+              })
+              .where(eq(drawingTemplates.id, existing.id));
+            hasNewSeed = true;
+          } catch {}
+        } else {
           try {
             await db
               .insert(drawingTemplates)
@@ -1242,13 +1273,17 @@ export async function getDrawingTemplates(): Promise<ShaftDrawingTemplate[]> {
         try {
           if (r.data) parsed = JSON.parse(r.data);
         } catch {}
+        const defTpl = DEFAULT_SHAFT_TEMPLATES.find((t) => t.id === r.id);
+        const resolvedElements = defTpl ? defTpl.elements : (Array.isArray(parsed.elements) ? parsed.elements : DEFAULT_SHAFT_TEMPLATE.elements);
+        const resolvedWidth = defTpl ? defTpl.viewBoxWidth : (parsed.viewBoxWidth || DEFAULT_SHAFT_TEMPLATE.viewBoxWidth);
+        const resolvedHeight = defTpl ? defTpl.viewBoxHeight : (parsed.viewBoxHeight || DEFAULT_SHAFT_TEMPLATE.viewBoxHeight);
         return {
           id: r.id,
           name: r.name,
           description: r.description || "",
-          elements: Array.isArray(parsed.elements) ? parsed.elements : DEFAULT_SHAFT_TEMPLATE.elements,
-          viewBoxWidth: parsed.viewBoxWidth || DEFAULT_SHAFT_TEMPLATE.viewBoxWidth,
-          viewBoxHeight: parsed.viewBoxHeight || DEFAULT_SHAFT_TEMPLATE.viewBoxHeight,
+          elements: resolvedElements,
+          viewBoxWidth: resolvedWidth,
+          viewBoxHeight: resolvedHeight,
           createdAt: r.createdAt.toISOString(),
           updatedAt: r.updatedAt.toISOString(),
         };

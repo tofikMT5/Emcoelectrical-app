@@ -3,6 +3,7 @@
 import { useState, useEffect, useMemo } from "react";
 import {
   DEFAULT_SHAFT_TEMPLATE,
+  DEFAULT_SHAFT_TEMPLATES,
   type ShaftDrawing,
   type ShaftDrawingTemplate,
 } from "@/lib/winding";
@@ -272,6 +273,17 @@ export function CostingShaftSection({
       return null;
     }
     if (drawing && drawing.elements && drawing.elements.length > 0) {
+      if (drawing.templateId) {
+        const tpl = DEFAULT_SHAFT_TEMPLATES.find((t) => t.id === drawing.templateId);
+        if (tpl) {
+          return {
+            ...drawing,
+            elements: JSON.parse(JSON.stringify(tpl.elements)),
+            viewBoxWidth: tpl.viewBoxWidth,
+            viewBoxHeight: tpl.viewBoxHeight,
+          };
+        }
+      }
       return drawing;
     }
     return {
@@ -582,18 +594,29 @@ export function CostingQuotationDrawingView({
   };
 }) {
   const drawing = useMemo(() => {
+    let resolved: ShaftDrawing | null = null;
     if (record.drawing && record.drawing.elements && record.drawing.elements.length > 0) {
-      return record.drawing;
-    }
-    if (record.drawingData) {
+      resolved = record.drawing;
+    } else if (record.drawingData) {
       try {
         const parsed = JSON.parse(record.drawingData);
         if (parsed && parsed.elements && parsed.elements.length > 0) {
-          return parsed as ShaftDrawing;
+          resolved = parsed as ShaftDrawing;
         }
       } catch {}
     }
-    return null;
+    if (resolved && resolved.templateId) {
+      const tpl = DEFAULT_SHAFT_TEMPLATES.find((t) => t.id === resolved.templateId);
+      if (tpl) {
+        return {
+          ...resolved,
+          elements: JSON.parse(JSON.stringify(tpl.elements)),
+          viewBoxWidth: tpl.viewBoxWidth,
+          viewBoxHeight: tpl.viewBoxHeight,
+        };
+      }
+    }
+    return resolved;
   }, [record.drawing, record.drawingData]);
 
   if (!drawing) return null;
