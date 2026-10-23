@@ -696,6 +696,33 @@ button:disabled { cursor: not-allowed; opacity: .62; }
   text-overflow: ellipsis;
 }
 
+.dim-field-label-input {
+  border: 1px solid transparent;
+  background: transparent;
+  font-size: 11px;
+  font-weight: 600;
+  color: #475569;
+  padding: 2px 4px;
+  border-radius: 4px;
+  width: 100%;
+  outline: none;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.dim-field-label-input:hover {
+  background: #f1f5f9;
+  border-color: #cbd5e1;
+}
+
+.dim-field-label-input:focus {
+  background: #ffffff;
+  border-color: #2563eb;
+  color: #0f172a;
+}
+
 .dim-field-input {
   min-height: 34px;
   font-size: 13px;

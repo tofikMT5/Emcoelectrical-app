@@ -1297,10 +1297,15 @@ export async function getDrawingTemplates(): Promise<ShaftDrawingTemplate[]> {
   const list = data.drawingTemplates || [...DEFAULT_SHAFT_TEMPLATES];
   let modified = false;
   for (const def of DEFAULT_SHAFT_TEMPLATES) {
-    const exists = list.some(
+    const idx = list.findIndex(
       (t) => t.id === def.id || t.name.toLowerCase().trim() === def.name.toLowerCase().trim(),
     );
-    if (!exists) {
+    if (idx >= 0) {
+      list[idx].elements = def.elements;
+      list[idx].viewBoxWidth = def.viewBoxWidth;
+      list[idx].viewBoxHeight = def.viewBoxHeight;
+      modified = true;
+    } else {
       list.push(def);
       modified = true;
     }
@@ -1325,13 +1330,17 @@ export async function getDrawingTemplateById(id: string): Promise<ShaftDrawingTe
         try {
           if (row.data) parsed = JSON.parse(row.data);
         } catch {}
+        const defTpl = DEFAULT_SHAFT_TEMPLATES.find((t) => t.id === row.id);
+        const resolvedElements = defTpl ? defTpl.elements : (Array.isArray(parsed.elements) ? parsed.elements : DEFAULT_SHAFT_TEMPLATE.elements);
+        const resolvedWidth = defTpl ? defTpl.viewBoxWidth : (parsed.viewBoxWidth || DEFAULT_SHAFT_TEMPLATE.viewBoxWidth);
+        const resolvedHeight = defTpl ? defTpl.viewBoxHeight : (parsed.viewBoxHeight || DEFAULT_SHAFT_TEMPLATE.viewBoxHeight);
         return {
           id: row.id,
           name: row.name,
           description: row.description || "",
-          elements: Array.isArray(parsed.elements) ? parsed.elements : DEFAULT_SHAFT_TEMPLATE.elements,
-          viewBoxWidth: parsed.viewBoxWidth || DEFAULT_SHAFT_TEMPLATE.viewBoxWidth,
-          viewBoxHeight: parsed.viewBoxHeight || DEFAULT_SHAFT_TEMPLATE.viewBoxHeight,
+          elements: resolvedElements,
+          viewBoxWidth: resolvedWidth,
+          viewBoxHeight: resolvedHeight,
           createdAt: row.createdAt.toISOString(),
           updatedAt: row.updatedAt.toISOString(),
         };

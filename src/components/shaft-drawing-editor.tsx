@@ -99,6 +99,104 @@ export function ShaftDrawingSVG({
         if (el.type === "dimension") {
           const rawValue = dimValues[el.id] !== undefined ? dimValues[el.id] : el.value || "";
           const rawLabel = dimLabels[el.id] !== undefined ? dimLabels[el.id] : el.label || "";
+          const isVertical = Math.abs(el.x1 - el.x2) < 2;
+
+          if (isVertical) {
+            const x = el.x1;
+            const minY = Math.min(el.y1, el.y2);
+            const maxY = Math.max(el.y1, el.y2);
+            const midY = (minY + maxY) / 2;
+
+            const trimmedVal = rawValue.trim();
+            const displayText = trimmedVal
+              ? (trimmedVal.toLowerCase().endsWith("mm") ? trimmedVal : `${trimmedVal} mm`)
+              : "— mm";
+            const subText = rawLabel ? rawLabel : "";
+
+            // Keep pill compact to prevent overlap with adjacent steps
+            const stepWidth = x === 100 ? 80 : x === 175 ? 70 : x === 240 ? 60 : x === 420 ? 300 : x === 600 ? 60 : x === 660 ? 60 : 50;
+            const maxW = Math.min(stepWidth - 6, 76);
+            const textChars = Math.max(displayText.length, subText.length);
+            const pillWidth = Math.max(44, Math.min(maxW, textChars * 6.5 + 10));
+            const pillHeight = subText ? 22 : 16;
+
+            return (
+              <g key={el.id} className="dimension-group dimension-vertical">
+                {/* Vertical dimension line with arrowheads touching top and bottom step profile edges */}
+                <line
+                  x1={x}
+                  y1={minY}
+                  x2={x}
+                  y2={maxY}
+                  stroke="#1e293b"
+                  strokeWidth={1.25}
+                  markerStart="url(#dim-arrow-start)"
+                  markerEnd="url(#dim-arrow-end)"
+                />
+
+                {/* Small boundary ticks */}
+                <line
+                  x1={x - 4}
+                  y1={minY}
+                  x2={x + 4}
+                  y2={minY}
+                  stroke="#64748b"
+                  strokeWidth="1"
+                />
+                <line
+                  x1={x - 4}
+                  y1={maxY}
+                  x2={x + 4}
+                  y2={maxY}
+                  stroke="#64748b"
+                  strokeWidth="1"
+                />
+
+                {/* Technical white pill centered at red square position */}
+                <rect
+                  x={x - pillWidth / 2}
+                  y={midY - pillHeight / 2}
+                  width={pillWidth}
+                  height={pillHeight}
+                  fill="#ffffff"
+                  rx="3"
+                  stroke="#cbd5e1"
+                  strokeWidth="0.5"
+                />
+
+                {/* Dimension measurement value (e.g. 25 mm or — mm) */}
+                <text
+                  x={x}
+                  y={midY - (subText ? 4 : 0)}
+                  fill={trimmedVal ? "#0f172a" : "#94a3b8"}
+                  fontSize={pillWidth < 50 ? "9" : "10"}
+                  fontWeight="700"
+                  fontFamily="ui-monospace, SFMono-Regular, Menlo, monospace"
+                  textAnchor="middle"
+                  dominantBaseline="middle"
+                >
+                  {displayText}
+                </text>
+
+                {/* Secondary descriptive label */}
+                {subText && (
+                  <text
+                    x={x}
+                    y={midY + 5.5}
+                    fill="#64748b"
+                    fontSize={pillWidth < 50 ? "6.5" : "7.5"}
+                    fontWeight="600"
+                    fontFamily="system-ui, -apple-system, sans-serif"
+                    textAnchor="middle"
+                    dominantBaseline="middle"
+                  >
+                    {subText}
+                  </text>
+                )}
+              </g>
+            );
+          }
+
           const offset = el.offset || -30;
 
           // Dimension line is shifted by offset perpendicular to profile
@@ -108,30 +206,35 @@ export function ShaftDrawingSVG({
           const midX = (minX + maxX) / 2;
 
           // Extension lines from profile points towards dimension line
-          const extY1 = Math.min(el.y1, dimY) - 4;
-          const extY2 = Math.max(el.y1, dimY) + 4;
+          const ext1Y1 = Math.min(el.y1, dimY) - 4;
+          const ext1Y2 = Math.max(el.y1, dimY) + 4;
+          const ext2Y1 = Math.min(el.y2, dimY) - 4;
+          const ext2Y2 = Math.max(el.y2, dimY) + 4;
 
-          const displayText = rawValue ? rawValue : "— mm";
+          const trimmedVal = rawValue.trim();
+          const displayText = trimmedVal
+            ? (trimmedVal.toLowerCase().endsWith("mm") ? trimmedVal : `${trimmedVal} mm`)
+            : "— mm";
           const subText = rawLabel ? rawLabel : "";
           const pillWidth = Math.max(76, Math.max(displayText.length * 7, subText.length * 6) + 14);
 
           return (
-            <g key={el.id} className="dimension-group">
+            <g key={el.id} className="dimension-group dimension-horizontal">
               {/* Extension lines at both ends */}
               <line
                 x1={el.x1}
-                y1={extY1}
+                y1={ext1Y1}
                 x2={el.x1}
-                y2={extY2}
+                y2={ext1Y2}
                 stroke="#64748b"
                 strokeWidth="1"
                 strokeDasharray="2 2"
               />
               <line
                 x1={el.x2}
-                y1={extY1}
+                y1={ext2Y1}
                 x2={el.x2}
-                y2={extY2}
+                y2={ext2Y2}
                 stroke="#64748b"
                 strokeWidth="1"
                 strokeDasharray="2 2"
@@ -165,7 +268,7 @@ export function ShaftDrawingSVG({
               <text
                 x={midX}
                 y={dimY - (subText ? 5 : 0)}
-                fill={rawValue ? "#0f172a" : "#94a3b8"}
+                fill={trimmedVal ? "#0f172a" : "#94a3b8"}
                 fontSize="11"
                 fontWeight="700"
                 fontFamily="ui-monospace, SFMono-Regular, Menlo, monospace"
@@ -332,6 +435,19 @@ export function CostingShaftSection({
     });
   };
 
+  // Change a dimension label right in the costing form
+  const handleDimensionLabelChange = (dimId: string, newLabel: string) => {
+    if (!currentDrawing) return;
+    const updatedLabels = {
+      ...(currentDrawing.dimensionLabels || {}),
+      [dimId]: newLabel,
+    };
+    onChangeDrawing({
+      ...currentDrawing,
+      dimensionLabels: updatedLabels,
+    });
+  };
+
   // Extract all dimension elements for instant inline number editing
   const dimensionElements = useMemo(() => {
     return (currentDrawing?.elements || []).filter((el) => el.type === "dimension");
@@ -479,13 +595,21 @@ export function CostingShaftSection({
                     currentDrawing.dimensionValues?.[dim.id] !== undefined
                       ? currentDrawing.dimensionValues[dim.id]
                       : dim.value || "";
-                  const label = dim.label || `Dimension ${idx + 1}`;
+                  const currentLabel =
+                    currentDrawing.dimensionLabels?.[dim.id] !== undefined
+                      ? currentDrawing.dimensionLabels[dim.id]
+                      : dim.label || `Dimension ${idx + 1}`;
 
                   return (
                     <div key={dim.id} className="dim-field-card">
-                      <span className="dim-field-label" title={dim.id}>
-                        {label}
-                      </span>
+                      <input
+                        type="text"
+                        className="dim-field-label-input"
+                        value={currentLabel}
+                        onChange={(e) => handleDimensionLabelChange(dim.id, e.target.value)}
+                        placeholder="Label"
+                        title="Click to edit dimension label"
+                      />
                       <input
                         type="text"
                         className="input dim-field-input"
