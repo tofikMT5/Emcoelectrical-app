@@ -1,14 +1,17 @@
 "use client";
 
-import { FormEvent, useMemo, useState } from "react";
+import { FormEvent, useMemo, useRef, useState } from "react";
 import {
   COST_ITEM_KEYS,
   COST_ITEM_LABELS,
+  COMMON_COST_UNITS,
   calculateCostTotal,
   emptyCostItems,
   DEFAULT_SHAFT_TEMPLATE,
   type CostItemKey,
   type CostItems,
+  type CostItemDetails,
+  type CostItemLabels,
   type MotorCostingRecord,
   type Settings,
   type ShaftDrawing,
@@ -16,6 +19,7 @@ import {
 } from "@/lib/winding";
 import { parseDrawingData } from "./technical-drawing";
 import { CostingQuotationDrawingView, CostingShaftSection } from "./shaft-drawing-editor";
+import { parseCostExpression, type CalcParsedOutput } from "@/lib/cost-calculator";
 
 function formatCurrency(amount: number | string | undefined): string {
   const num = Number(amount) || 0;
@@ -489,15 +493,24 @@ export function CostingQuotationView({
             </thead>
             <tbody>
               {COST_ITEM_KEYS.map((key, index) => {
-                const label = key === "tbfc" ? record.tbfcLabel || "T.B.F.C." : COST_ITEM_LABELS[key];
+                const customLabel = record.itemLabels?.[key] || (key === "tbfc" ? record.tbfcLabel : undefined);
+                const resolvedCustom = (key === "tbfc" && (customLabel === "T.B.F.C." || !customLabel)) ? "T.E.F.C." : customLabel;
+                const label = resolvedCustom || COST_ITEM_LABELS[key];
+                const detail = record.itemDetails?.[key];
                 const amount = Number(record.items[key]) || 0;
+                const hasQty = detail?.quantity !== undefined && detail.quantity > 0;
                 return (
                   <tr key={key}>
                     <td className="text-center">{index + 1}</td>
                     <td>
                       <strong>{label}</strong>
-                      {key === "tbfc" && (
-                        <small className="tbfc-note no-print"> (handwritten abbreviation)</small>
+                      {hasQty && (
+                        <div style={{ fontSize: "11.5px", color: "#516d89", marginTop: "2px" }}>
+                          Qty: <strong>{detail.quantity} {detail.unit || "pcs"}</strong>
+                          {detail.rate !== undefined && (
+                            <span> @ {formatCurrency(detail.rate)} / {detail.unit || "pcs"}</span>
+                          )}
+                        </div>
                       )}
                     </td>
                     <td className="text-right">
@@ -623,7 +636,11 @@ export function CostingForm({
   const [backBearingCover, setBackBearingCover] = useState(
     initialRecord?.backBearingCover || "",
   );
-  const [tbfcLabel, setTbfcLabel] = useState(initialRecord?.tbfcLabel || "T.B.F.C.");
+  const [tbfcLabel, setTbfcLabel] = useState(
+    initialRecord?.tbfcLabel && initialRecord.tbfcLabel !== "T.B.F.C."
+      ? initialRecord.tbfcLabel
+      : "T.E.F.C."
+  );
 
   // Shaft / Profile Drawing Template State
   const [drawing, setDrawing] = useState<ShaftDrawing | null>(() => {
@@ -649,22 +666,313 @@ export function CostingForm({
     };
   });
 
-  // Cost Items
-  const [items, setItems] = useState<CostItems>(
-    initialRecord?.items ? { ...initialRecord.items } : emptyCostItems(),
-  );
+const STORAGE_LABELS_KEY = "emco_costing_custom_labels";
+
+function getPersistentLabels(): Record<string, string> {
+  if (typeof window === "undefined") return {};
+  try {
+    const raw = localStorage.getItem(STORAGE_LABELS_KEY);
+    if (raw) return JSON.parse(raw);
+  } catch {}
+  return {};
+}
+
+function savePersistentLabels(labels: Record<string, string>) {
+  if (typeof window === "undefined") return;
+  try {
+    localStorage.setItem(STORAGE_LABELS_KEY, JSON.stringify(labels));
+  } catch {}
+}
+
+function computeLineAmount(qtyStr: string, rateStr: string): number {
+  const rateNum = parseFloat(rateStr.replace(/[₹\s,]/g, ""));
+  if (Number.isNaN(rateNum) || rateNum <= 0) return 0;
+  const qtyNum = parseFloat(qtyStr);
+  if (!Number.isNaN(qtyNum) && qtyNum > 0) {
+    return Math.round(qtyNum * rateNum * 100) / 100;
+  }
+  return Math.round(rateNum * 100) / 100;
+}
+
+function formatLineAmount(val: number | string | undefined): string {
+  if (val === undefined || val === null || val === "") return "";
+  const num = typeof val === "number" ? val : parseFloat(String(val).replace(/[₹\s,]/g, ""));
+  if (Number.isNaN(num) || num <= 0) return "";
+  return new Intl.NumberFormat("en-IN", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(num);
+}
+
+  // Cost Item Labels state (persisted across sessions and saved with record)
+  const [itemLabels, setItemLabels] = useState<Record<CostItemKey, string>>(() => {
+    const saved = getPersistentLabels();
+    const result: Record<CostItemKey, string> = { ...COST_ITEM_LABELS };
+    for (const k of COST_ITEM_KEYS) {
+      if (saved[k]) {
+        result[k] = (k === "tbfc" && saved[k] === "T.B.F.C.") ? "T.E.F.C." : saved[k];
+      }
+    }
+    if (initialRecord?.itemLabels) {
+      for (const k of COST_ITEM_KEYS) {
+        if (initialRecord.itemLabels[k]) {
+          result[k] = (k === "tbfc" && initialRecord.itemLabels[k] === "T.B.F.C.") ? "T.E.F.C." : initialRecord.itemLabels[k]!;
+        }
+      }
+    }
+    if (initialRecord?.tbfcLabel) {
+      result.tbfc = initialRecord.tbfcLabel === "T.B.F.C." ? "T.E.F.C." : initialRecord.tbfcLabel;
+    }
+    return result;
+  });
+
+  // Rename inline editing state
+  const [renamingKey, setRenamingKey] = useState<CostItemKey | null>(null);
+  const [tempLabel, setTempLabel] = useState("");
+  const renameInputRef = useRef<HTMLInputElement>(null);
+
+  // Quantities state (saved with record, reset for fresh records)
+  const [quantities, setQuantities] = useState<Record<CostItemKey, string>>(() => {
+    const q: Record<CostItemKey, string> = {} as any;
+    for (const k of COST_ITEM_KEYS) {
+      if (initialRecord?.itemDetails?.[k]?.quantity !== undefined) {
+        q[k] = String(initialRecord.itemDetails[k]!.quantity);
+      } else {
+        q[k] = "";
+      }
+    }
+    return q;
+  });
+
+  // Units state
+  const [units, setUnits] = useState<Record<CostItemKey, string>>(() => {
+    const u: Record<CostItemKey, string> = {} as any;
+    for (const k of COST_ITEM_KEYS) {
+      if (initialRecord?.itemDetails?.[k]?.unit) {
+        u[k] = initialRecord.itemDetails[k]!.unit!;
+      } else {
+        u[k] = k === "ciCasting" || k === "copperWire" ? "kg" : "pcs";
+      }
+    }
+    return u;
+  });
+
+  // Unit Rates state
+  const [rates, setRates] = useState<Record<CostItemKey, string>>(() => {
+    const r: Record<CostItemKey, string> = {} as any;
+    for (const k of COST_ITEM_KEYS) {
+      if (initialRecord?.itemDetails?.[k]?.rate !== undefined) {
+        r[k] = String(initialRecord.itemDetails[k]!.rate);
+      } else if (initialRecord?.items?.[k]) {
+        // Backwards compatibility for older records without quantity/rate fields
+        const q = initialRecord.itemDetails?.[k]?.quantity;
+        if (q && q > 0) {
+          r[k] = String(Math.round((initialRecord.items[k] / q) * 100) / 100);
+        } else {
+          r[k] = String(initialRecord.items[k]);
+        }
+      } else {
+        r[k] = "";
+      }
+    }
+    return r;
+  });
+
+  // Line amounts (items) state
+  const [items, setItems] = useState<CostItems>(() => {
+    if (initialRecord?.items) {
+      return { ...initialRecord.items };
+    }
+    return emptyCostItems();
+  });
+
+  // Price input display strings (shows formatted line amount, e.g. "75,000.00")
+  const [priceInputs, setPriceInputs] = useState<Record<CostItemKey, string>>(() => {
+    const p: Record<CostItemKey, string> = {} as any;
+    for (const k of COST_ITEM_KEYS) {
+      if (initialRecord?.items?.[k]) {
+        p[k] = formatLineAmount(initialRecord.items[k]);
+      } else {
+        p[k] = "";
+      }
+    }
+    return p;
+  });
+
+  // Compact inline calculator modal state
+  const [calcKey, setCalcKey] = useState<CostItemKey | null>(null);
+  const [calcExpr, setCalcExpr] = useState("");
+  const [calcResult, setCalcResult] = useState<CalcParsedOutput | null>(null);
+  const calcInputRef = useRef<HTMLInputElement>(null);
 
   const [companyError, setCompanyError] = useState("");
 
   // Instant calculated total
   const totalAmount = useMemo(() => calculateCostTotal(items), [items]);
 
-  const handleItemChange = (key: CostItemKey, rawValue: string) => {
-    const val = rawValue === "" ? 0 : parseFloat(rawValue);
-    setItems((prev) => ({
-      ...prev,
-      [key]: Number.isFinite(val) && val >= 0 ? val : 0,
-    }));
+  const handleStartRename = (key: CostItemKey, currentLabel: string) => {
+    setRenamingKey(key);
+    setTempLabel(currentLabel);
+    setTimeout(() => {
+      renameInputRef.current?.focus();
+      renameInputRef.current?.select();
+    }, 50);
+  };
+
+  const handleSaveRename = (key: CostItemKey) => {
+    const trimmed = tempLabel.trim();
+    if (trimmed) {
+      const updated = { ...itemLabels, [key]: trimmed };
+      setItemLabels(updated);
+      savePersistentLabels(updated);
+      if (key === "tbfc") {
+        setTbfcLabel(trimmed);
+      }
+    }
+    setRenamingKey(null);
+    setTempLabel("");
+  };
+
+  const handleCancelRename = () => {
+    setRenamingKey(null);
+    setTempLabel("");
+  };
+
+  const handleQtyChange = (key: CostItemKey, rawVal: string) => {
+    setQuantities((prev) => {
+      const nextQ = { ...prev, [key]: rawVal };
+      const qNum = parseFloat(rawVal);
+      let curRateNum = rates[key] ? parseFloat(rates[key]) : NaN;
+      if (Number.isNaN(curRateNum) || curRateNum <= 0) {
+        const prevQ = prev[key] ? parseFloat(prev[key]) : NaN;
+        if (!Number.isNaN(prevQ) && prevQ > 0 && items[key] > 0) {
+          curRateNum = Math.round((items[key] / prevQ) * 100) / 100;
+        } else if (items[key] > 0) {
+          curRateNum = items[key];
+        }
+      }
+
+      if (!Number.isNaN(qNum) && qNum > 0 && !Number.isNaN(curRateNum) && curRateNum > 0) {
+        const lineAmt = Math.round(qNum * curRateNum * 100) / 100;
+        setItems((prevItems) => ({ ...prevItems, [key]: lineAmt }));
+        setPriceInputs((prevP) => ({ ...prevP, [key]: formatLineAmount(lineAmt) }));
+        setRates((prevR) => ({ ...prevR, [key]: String(curRateNum) }));
+      }
+      return nextQ;
+    });
+  };
+
+  const handleUnitChange = (key: CostItemKey, rawUnit: string) => {
+    setUnits((prev) => ({ ...prev, [key]: rawUnit }));
+  };
+
+  const handlePriceChange = (key: CostItemKey, rawVal: string) => {
+    setPriceInputs((prev) => ({ ...prev, [key]: rawVal }));
+    const cleaned = rawVal.replace(/[₹\s,]/g, "");
+    if (!cleaned) {
+      setItems((prev) => ({ ...prev, [key]: 0 }));
+      return;
+    }
+    const num = parseFloat(cleaned);
+    if (!Number.isNaN(num) && num >= 0) {
+      setItems((prev) => ({ ...prev, [key]: num }));
+      const q = quantities[key] ? parseFloat(quantities[key]) : NaN;
+      if (!Number.isNaN(q) && q > 0) {
+        setRates((prev) => ({ ...prev, [key]: String(Math.round((num / q) * 100) / 100) }));
+      } else {
+        setRates((prev) => ({ ...prev, [key]: String(num) }));
+      }
+    }
+  };
+
+  const handlePriceBlur = (key: CostItemKey) => {
+    const num = items[key] || 0;
+    setPriceInputs((prev) => ({ ...prev, [key]: num > 0 ? formatLineAmount(num) : "" }));
+  };
+
+  const openCalculator = (key: CostItemKey) => {
+    setCalcKey(key);
+    const curQty = quantities[key] || "";
+    const curUnit = units[key] || (key === "ciCasting" || key === "copperWire" ? "kg" : "pcs");
+    let curRate = rates[key] || "";
+    if (!curRate || parseFloat(curRate) <= 0) {
+      const qNum = curQty ? parseFloat(curQty) : NaN;
+      if (!Number.isNaN(qNum) && qNum > 0 && items[key] > 0) {
+        curRate = String(Math.round((items[key] / qNum) * 100) / 100);
+      } else if (items[key] > 0) {
+        curRate = String(items[key]);
+      }
+    }
+
+    let defaultExpr = "";
+    if (curQty && parseFloat(curQty) > 0 && curRate && parseFloat(curRate) > 0) {
+      defaultExpr = `${curQty}${curUnit} x ${curRate}`;
+    } else if (curRate && parseFloat(curRate) > 0) {
+      defaultExpr = curRate;
+    } else if (curQty && parseFloat(curQty) > 0) {
+      defaultExpr = `${curQty}${curUnit} x `;
+    }
+
+    setCalcExpr(defaultExpr);
+    if (defaultExpr) {
+      setCalcResult(parseCostExpression(defaultExpr, curQty, curUnit));
+    } else {
+      setCalcResult(null);
+    }
+    setTimeout(() => {
+      calcInputRef.current?.focus();
+      calcInputRef.current?.select();
+    }, 60);
+  };
+
+  const handleCalcExprChange = (expr: string) => {
+    setCalcExpr(expr);
+    if (!calcKey) return;
+    const curQty = quantities[calcKey] || "";
+    const curUnit = units[calcKey] || "pcs";
+    const res = parseCostExpression(expr, curQty, curUnit);
+    setCalcResult(res);
+  };
+
+  const handleKeypadAppend = (token: string) => {
+    const nextExpr = calcExpr + token;
+    handleCalcExprChange(nextExpr);
+  };
+
+  const applyCalculator = () => {
+    if (!calcKey || !calcResult || !calcResult.isValid) return;
+
+    const key = calcKey;
+    if (calcResult.quantity !== undefined) {
+      setQuantities((prev) => ({ ...prev, [key]: String(calcResult.quantity) }));
+    }
+    if (calcResult.unit !== undefined) {
+      setUnits((prev) => ({ ...prev, [key]: calcResult.unit! }));
+    }
+    if (calcResult.rate !== undefined) {
+      setRates((prev) => ({ ...prev, [key]: String(calcResult.rate) }));
+    }
+
+    const finalAmount =
+      calcResult.lineAmount !== undefined
+        ? calcResult.lineAmount
+        : computeLineAmount(
+            calcResult.quantity !== undefined ? String(calcResult.quantity) : (quantities[key] || ""),
+            calcResult.rate !== undefined ? String(calcResult.rate) : (rates[key] || "")
+          );
+
+    setItems((prev) => ({ ...prev, [key]: finalAmount }));
+    setPriceInputs((prev) => ({ ...prev, [key]: formatLineAmount(finalAmount) }));
+
+    setCalcKey(null);
+    setCalcExpr("");
+    setCalcResult(null);
+  };
+
+  const cancelCalculator = () => {
+    setCalcKey(null);
+    setCalcExpr("");
+    setCalcResult(null);
   };
 
   // Link from existing motor record
@@ -695,6 +1003,19 @@ export function CostingForm({
     }
     setCompanyError("");
 
+    const detailsToSave: CostItemDetails = {};
+    for (const key of COST_ITEM_KEYS) {
+      const qNum = quantities[key] !== "" ? parseFloat(quantities[key]) : undefined;
+      const rNum = rates[key] !== "" ? parseFloat(rates[key]) : undefined;
+      detailsToSave[key] = {
+        label: itemLabels[key] || COST_ITEM_LABELS[key],
+        quantity: qNum !== undefined && !Number.isNaN(qNum) ? qNum : undefined,
+        unit: units[key] || "pcs",
+        rate: rNum !== undefined && !Number.isNaN(rNum) ? rNum : undefined,
+        amount: items[key] || 0,
+      };
+    }
+
     await onSave({
       companyName: companyName.trim(),
       motorRecordId: motorRecordId || null,
@@ -708,7 +1029,9 @@ export function CostingForm({
       bodyLength: bodyLength.trim(),
       frontBearingCover: frontBearingCover.trim(),
       backBearingCover: backBearingCover.trim(),
-      tbfcLabel: tbfcLabel.trim() || "T.B.F.C.",
+      tbfcLabel: (itemLabels.tbfc === "T.B.F.C." ? "T.E.F.C." : itemLabels.tbfc) || (tbfcLabel.trim() === "T.B.F.C." ? "T.E.F.C." : tbfcLabel.trim()) || "T.E.F.C.",
+      itemLabels,
+      itemDetails: detailsToSave,
       items,
       totalAmount,
       drawing: drawing || null,
@@ -863,42 +1186,168 @@ export function CostingForm({
           <div className="field-grid costing-items-grid">
             {COST_ITEM_KEYS.map((key) => {
               const defaultLabel = COST_ITEM_LABELS[key];
-              const isTbfc = key === "tbfc";
-              const currentVal = items[key] ? String(items[key]) : "";
+              const currentLabel = itemLabels[key] || defaultLabel;
+              const currentQty = quantities[key] || "";
+              const currentUnit = units[key] || (key === "ciCasting" || key === "copperWire" ? "kg" : "pcs");
+              const lineAmount = items[key] || 0;
+              const isStandardUnit = (COMMON_COST_UNITS as readonly string[]).includes(currentUnit);
 
               return (
                 <div key={key} className="cost-input-card">
+                  {/* LABEL & RENAME AREA */}
                   <div className="cost-input-label-area">
-                    {isTbfc ? (
-                      <div className="tbfc-label-wrapper">
-                        <span className="field-label">
-                          Field Label (Editable):
-                        </span>
+                    {renamingKey === key ? (
+                      <div className="rename-item-form">
                         <input
+                          ref={renameInputRef}
                           type="text"
-                          className="input tbfc-label-input"
-                          value={tbfcLabel}
-                          onChange={(e) => setTbfcLabel(e.target.value)}
-                          placeholder="T.B.F.C."
-                          title="Handwritten abbreviation — kept editable as requested"
+                          className="input rename-item-input"
+                          value={tempLabel}
+                          onChange={(e) => setTempLabel(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") {
+                              e.preventDefault();
+                              handleSaveRename(key);
+                            } else if (e.key === "Escape") {
+                              e.preventDefault();
+                              handleCancelRename();
+                            }
+                          }}
+                          placeholder="Item name"
+                          autoFocus
                         />
+                        <button
+                          type="button"
+                          className="rename-action-btn save"
+                          onClick={() => handleSaveRename(key)}
+                          title="Save renamed label"
+                          aria-label="Save renamed label"
+                        >
+                          ✓
+                        </button>
+                        <button
+                          type="button"
+                          className="rename-action-btn cancel"
+                          onClick={handleCancelRename}
+                          title="Cancel rename"
+                          aria-label="Cancel rename"
+                        >
+                          ✕
+                        </button>
                       </div>
                     ) : (
-                      <span className="field-label">{defaultLabel}</span>
+                      <div className="cost-label-title-row">
+                        <span className="field-label cost-item-name">{currentLabel}</span>
+                        <button
+                          type="button"
+                          className="rename-item-btn"
+                          onClick={() => handleStartRename(key, currentLabel)}
+                          title="Rename item"
+                          aria-label={`Rename ${currentLabel}`}
+                        >
+                          <svg
+                            width="13"
+                            height="13"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="2.2"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                          >
+                            <path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z" />
+                          </svg>
+                        </button>
+                      </div>
                     )}
                   </div>
 
-                  <div className="currency-input-wrapper">
-                    <span className="currency-prefix">₹</span>
+                  {/* QUANTITY & UNIT AREA */}
+                  <div className="cost-qty-unit-area">
                     <input
                       type="number"
                       min="0"
-                      step="0.01"
-                      className="input currency-input"
-                      value={currentVal}
-                      onChange={(e) => handleItemChange(key, e.target.value)}
-                      placeholder="0.00"
+                      step="any"
+                      className="input cost-qty-input"
+                      value={currentQty}
+                      onChange={(e) => handleQtyChange(key, e.target.value)}
+                      placeholder="Qty"
+                      title="Quantity (e.g. 15)"
                     />
+                    <select
+                      className="input cost-unit-select"
+                      value={isStandardUnit ? currentUnit : "__custom__"}
+                      onChange={(e) => {
+                        if (e.target.value === "__custom__") {
+                          handleUnitChange(key, "");
+                        } else {
+                          handleUnitChange(key, e.target.value);
+                        }
+                      }}
+                      title="Select unit of measurement"
+                    >
+                      {COMMON_COST_UNITS.map((u) => (
+                        <option key={u} value={u}>
+                          {u}
+                        </option>
+                      ))}
+                      <option value="__custom__">Custom…</option>
+                    </select>
+                    {!isStandardUnit && (
+                      <input
+                        type="text"
+                        className="input cost-unit-custom-input"
+                        value={currentUnit}
+                        onChange={(e) => handleUnitChange(key, e.target.value)}
+                        placeholder="Unit"
+                        title="Enter custom unit (e.g. set, coil, box)"
+                        autoFocus
+                      />
+                    )}
+                  </div>
+
+                  {/* PRICE & CALCULATOR AREA */}
+                  <div className="cost-rate-area">
+                    <div className="currency-input-wrapper">
+                      <span className="currency-prefix">₹</span>
+                      <input
+                        type="text"
+                        inputMode="decimal"
+                        className="input currency-input"
+                        value={priceInputs[key] ?? ""}
+                        onChange={(e) => handlePriceChange(key, e.target.value)}
+                        onBlur={() => handlePriceBlur(key)}
+                        onClick={() => openCalculator(key)}
+                        placeholder="0.00"
+                        title="Click to open compact calculator"
+                      />
+                      <button
+                        type="button"
+                        className="calc-open-btn"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          openCalculator(key);
+                        }}
+                        title="Open calculator"
+                        aria-label={`Open calculator for ${currentLabel}`}
+                      >
+                        <svg
+                          width="14"
+                          height="14"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="2"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        >
+                          <rect x="4" y="2" width="16" height="20" rx="2" />
+                          <line x1="8" y1="6" x2="16" y2="6" />
+                          <line x1="16" y1="14" x2="16" y2="18" />
+                          <path d="M8 10h.01M12 10h.01M16 10h.01M8 14h.01M12 14h.01M8 18h.01M12 18h.01" />
+                        </svg>
+                      </button>
+                    </div>
                   </div>
                 </div>
               );
@@ -977,6 +1426,200 @@ export function CostingForm({
           </button>
         </div>
       </form>
+
+      {/* COMPACT INLINE CALCULATOR MODAL */}
+      {calcKey && (
+        <div className="modal-backdrop" onClick={cancelCalculator}>
+          <div className="inline-calc-card" onClick={(e) => e.stopPropagation()}>
+            <div className="calc-card-head">
+              <div>
+                <span className="calc-eyebrow">Cost Calculator</span>
+                <h4>{itemLabels[calcKey] || COST_ITEM_LABELS[calcKey]}</h4>
+              </div>
+              <button
+                type="button"
+                className="close-btn"
+                onClick={cancelCalculator}
+                aria-label="Close calculator"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="calc-body">
+              <label className="field">
+                <span className="field-label">Formula or Price Expression</span>
+                <input
+                  ref={calcInputRef}
+                  type="text"
+                  className="input calc-expr-input"
+                  value={calcExpr}
+                  onChange={(e) => handleCalcExprChange(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      applyCalculator();
+                    } else if (e.key === "Escape") {
+                      e.preventDefault();
+                      cancelCalculator();
+                    }
+                  }}
+                  placeholder="e.g. 15kg x 500 or 500 + 50"
+                  autoFocus
+                />
+              </label>
+
+              <div
+                className={`calc-preview-box ${
+                  calcResult?.isValid ? "valid" : calcExpr.trim() ? "invalid" : "idle"
+                }`}
+              >
+                {calcResult?.isValid ? (
+                  <div>
+                    <div className="calc-preview-top">
+                      <span className="calc-preview-label">Live Line Amount:</span>
+                      <strong className="calc-preview-total">
+                        {formatCurrency(calcResult.lineAmount)}
+                      </strong>
+                    </div>
+                    <div className="calc-preview-detail">{calcResult.displayText}</div>
+                  </div>
+                ) : calcExpr.trim() ? (
+                  <div className="calc-error-preview">
+                    ⚠️ {calcResult?.error || "Invalid calculation expression."}
+                  </div>
+                ) : (
+                  <div className="calc-hint-preview">
+                    Type direct price, arithmetic (<code>450 + 50</code>), or formula with unit (
+                    <code>15kg x 500</code>).
+                  </div>
+                )}
+              </div>
+
+              <div className="calc-keypad">
+                <button type="button" className="calc-key" onClick={() => handleKeypadAppend("7")}>
+                  7
+                </button>
+                <button type="button" className="calc-key" onClick={() => handleKeypadAppend("8")}>
+                  8
+                </button>
+                <button type="button" className="calc-key" onClick={() => handleKeypadAppend("9")}>
+                  9
+                </button>
+                <button
+                  type="button"
+                  className="calc-key op"
+                  onClick={() => handleKeypadAppend(" ÷ ")}
+                >
+                  ÷
+                </button>
+                <button
+                  type="button"
+                  className="calc-key danger"
+                  onClick={() => handleCalcExprChange("")}
+                  title="Clear"
+                >
+                  C
+                </button>
+
+                <button type="button" className="calc-key" onClick={() => handleKeypadAppend("4")}>
+                  4
+                </button>
+                <button type="button" className="calc-key" onClick={() => handleKeypadAppend("5")}>
+                  5
+                </button>
+                <button type="button" className="calc-key" onClick={() => handleKeypadAppend("6")}>
+                  6
+                </button>
+                <button
+                  type="button"
+                  className="calc-key op"
+                  onClick={() => handleKeypadAppend(" × ")}
+                >
+                  ×
+                </button>
+                <button
+                  type="button"
+                  className="calc-key unit"
+                  onClick={() => handleKeypadAppend("kg")}
+                >
+                  kg
+                </button>
+
+                <button type="button" className="calc-key" onClick={() => handleKeypadAppend("1")}>
+                  1
+                </button>
+                <button type="button" className="calc-key" onClick={() => handleKeypadAppend("2")}>
+                  2
+                </button>
+                <button type="button" className="calc-key" onClick={() => handleKeypadAppend("3")}>
+                  3
+                </button>
+                <button
+                  type="button"
+                  className="calc-key op"
+                  onClick={() => handleKeypadAppend(" - ")}
+                >
+                  -
+                </button>
+                <button
+                  type="button"
+                  className="calc-key unit"
+                  onClick={() => handleKeypadAppend("pcs")}
+                >
+                  pcs
+                </button>
+
+                <button type="button" className="calc-key" onClick={() => handleKeypadAppend("0")}>
+                  0
+                </button>
+                <button type="button" className="calc-key" onClick={() => handleKeypadAppend(".")}>
+                  .
+                </button>
+                <button
+                  type="button"
+                  className="calc-key op"
+                  onClick={() => handleKeypadAppend(" + ")}
+                >
+                  +
+                </button>
+                <button
+                  type="button"
+                  className="calc-key op"
+                  onClick={() => handleKeypadAppend("(")}
+                >
+                  (
+                </button>
+                <button
+                  type="button"
+                  className="calc-key op"
+                  onClick={() => handleKeypadAppend(")")}
+                >
+                  )
+                </button>
+              </div>
+
+              <div className="calc-actions">
+                <button
+                  type="button"
+                  className="button button-secondary"
+                  onClick={cancelCalculator}
+                >
+                  Cancel (Esc)
+                </button>
+                <button
+                  type="button"
+                  className="button"
+                  onClick={applyCalculator}
+                  disabled={!calcResult?.isValid}
+                >
+                  Confirm & Apply (Enter)
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 }

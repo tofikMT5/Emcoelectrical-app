@@ -97,13 +97,28 @@ export const COST_ITEM_LABELS: Record<CostItemKey, string> = {
   shaft: "Shaft",
   frontBearing: "Front Bearing",
   backBearing: "Back Bearing",
-  tbfc: "T.B.F.C.", // Handwritten abbreviation kept editable and visible
+  tbfc: "T.E.F.C.",
   copperWire: "Copper Wire",
   insulating: "Insulating",
   windingLabor: "Winding Labor",
   motorTestingLabor: "Motor Testing Labor",
   otherCharges: "Other Charges",
 };
+
+export const COMMON_COST_UNITS = ["kg", "g", "pcs", "m", "hr"] as const;
+export type CostUnit = (typeof COMMON_COST_UNITS)[number] | string;
+
+export type CostItemDetail = {
+  label?: string;
+  quantity?: number;
+  unit?: string;
+  rate?: number;
+  formula?: string;
+  amount?: number;
+};
+
+export type CostItemDetails = Partial<Record<CostItemKey, CostItemDetail>>;
+export type CostItemLabels = Partial<Record<CostItemKey, string>>;
 
 export type CostItems = Record<CostItemKey, number>;
 
@@ -200,7 +215,7 @@ export const DEFAULT_SHAFT_TEMPLATE: ShaftDrawingTemplate = {
   viewBoxWidth: 800,
   viewBoxHeight: 360,
   elements: [
-    { id: "line-center", type: "line", x1: 40, y1: 180, x2: 760, y2: 180, strokeWidth: 1, strokeDasharray: "8 5" },
+    { id: "line-center", type: "line", x1: 40, y1: 180, x2: 620, y2: 180, strokeWidth: 1, strokeDasharray: "8 5" },
     { id: "line-1", type: "line", x1: 60, y1: 155, x2: 60, y2: 205 },
     { id: "line-2", type: "line", x1: 60, y1: 155, x2: 140, y2: 155 },
     { id: "line-3", type: "line", x1: 60, y1: 205, x2: 140, y2: 205 },
@@ -216,40 +231,37 @@ export const DEFAULT_SHAFT_TEMPLATE: ShaftDrawingTemplate = {
     { id: "line-13", type: "line", x1: 270, y1: 260, x2: 270, y2: 240 },
     { id: "line-14", type: "line", x1: 270, y1: 120, x2: 430, y2: 120 },
     { id: "line-15", type: "line", x1: 270, y1: 240, x2: 430, y2: 240 },
-    { id: "line-16", type: "line", x1: 430, y1: 120, x2: 570, y2: 120 },
-    { id: "line-17", type: "line", x1: 430, y1: 240, x2: 570, y2: 240 },
-    { id: "line-18", type: "line", x1: 570, y1: 120, x2: 570, y2: 142 },
-    { id: "line-19", type: "line", x1: 570, y1: 240, x2: 570, y2: 218 },
-    { id: "line-20", type: "line", x1: 570, y1: 142, x2: 630, y2: 142 },
-    { id: "line-21", type: "line", x1: 570, y1: 218, x2: 630, y2: 218 },
-    { id: "line-22", type: "line", x1: 630, y1: 142, x2: 630, y2: 153 },
-    { id: "line-23", type: "line", x1: 630, y1: 218, x2: 630, y2: 207 },
-    { id: "line-24", type: "line", x1: 630, y1: 153, x2: 690, y2: 153 },
-    { id: "line-25", type: "line", x1: 630, y1: 207, x2: 690, y2: 207 },
-    { id: "line-26", type: "line", x1: 690, y1: 153, x2: 690, y2: 162 },
-    { id: "line-27", type: "line", x1: 690, y1: 207, x2: 690, y2: 198 },
-    { id: "line-28", type: "line", x1: 690, y1: 162, x2: 740, y2: 162 },
-    { id: "line-29", type: "line", x1: 690, y1: 198, x2: 740, y2: 198 },
-    { id: "line-30", type: "line", x1: 740, y1: 162, x2: 740, y2: 198 },
+    { id: "line-18", type: "line", x1: 430, y1: 120, x2: 430, y2: 142 },
+    { id: "line-19", type: "line", x1: 430, y1: 240, x2: 430, y2: 218 },
+    { id: "line-20", type: "line", x1: 430, y1: 142, x2: 490, y2: 142 },
+    { id: "line-21", type: "line", x1: 430, y1: 218, x2: 490, y2: 218 },
+    { id: "line-22", type: "line", x1: 490, y1: 142, x2: 490, y2: 153 },
+    { id: "line-23", type: "line", x1: 490, y1: 218, x2: 490, y2: 207 },
+    { id: "line-24", type: "line", x1: 490, y1: 153, x2: 550, y2: 153 },
+    { id: "line-25", type: "line", x1: 490, y1: 207, x2: 550, y2: 207 },
+    { id: "line-26", type: "line", x1: 550, y1: 153, x2: 550, y2: 162 },
+    { id: "line-27", type: "line", x1: 550, y1: 207, x2: 550, y2: 198 },
+    { id: "line-28", type: "line", x1: 550, y1: 162, x2: 600, y2: 162 },
+    { id: "line-29", type: "line", x1: 550, y1: 198, x2: 600, y2: 198 },
+    { id: "line-30", type: "line", x1: 600, y1: 162, x2: 600, y2: 198 },
     { id: "dim-1", type: "dimension", x1: 60, y1: 155, x2: 140, y2: 155, offset: -35, value: "60 mm", label: "Front Extension" },
     { id: "dim-2", type: "dimension", x1: 140, y1: 135, x2: 210, y2: 135, offset: -35, value: "40 mm", label: "Front Bearing Seat" },
     { id: "dim-3", type: "dimension", x1: 210, y1: 100, x2: 270, y2: 100, offset: -35, value: "50 mm", label: "Front Collar" },
     { id: "dim-4", type: "dimension", x1: 270, y1: 120, x2: 430, y2: 120, offset: -35, value: "100 mm", label: "Rotor Core Seat" },
-    { id: "dim-5", type: "dimension", x1: 430, y1: 120, x2: 570, y2: 120, offset: -35, value: "110 mm", label: "Body Shaft Length" },
-    { id: "dim-6", type: "dimension", x1: 570, y1: 142, x2: 630, y2: 142, offset: -35, value: "25 mm", label: "Back Bearing Seat" },
-    { id: "dim-7", type: "dimension", x1: 630, y1: 153, x2: 690, y2: 153, offset: -35, value: "25 mm", label: "Back Collar" },
-    { id: "dim-8", type: "dimension", x1: 690, y1: 162, x2: 740, y2: 162, offset: -35, value: "25 mm", label: "Back Extension" },
-    { id: "dim-overall", type: "dimension", x1: 60, y1: 100, x2: 740, y2: 100, offset: -68, value: "435 mm", label: "Total Shaft Length" },
-    { id: "dim-inner-length", type: "dimension", x1: 210, y1: 260, x2: 630, y2: 218, offset: 48, value: "", label: "Inner Length" },
+    { id: "dim-6", type: "dimension", x1: 430, y1: 142, x2: 490, y2: 142, offset: -35, value: "25 mm", label: "Back Bearing Seat" },
+    { id: "dim-7", type: "dimension", x1: 490, y1: 153, x2: 550, y2: 153, offset: -35, value: "25 mm", label: "Back Collar" },
+    { id: "dim-8", type: "dimension", x1: 550, y1: 162, x2: 600, y2: 162, offset: -35, value: "25 mm", label: "Back Extension" },
+    { id: "dim-overall", type: "dimension", x1: 60, y1: 100, x2: 600, y2: 100, offset: -68, value: "325 mm", label: "Total Shaft Length" },
+    { id: "dim-inner-length", type: "dimension", x1: 210, y1: 260, x2: 490, y2: 218, offset: 48, value: "", label: "Inner Length" },
     { id: "dim-dia-1", type: "dimension", x1: 100, y1: 155, x2: 100, y2: 205, value: "", label: "Front Ext Dia" },
     { id: "dim-dia-2", type: "dimension", x1: 175, y1: 135, x2: 175, y2: 225, value: "", label: "Front Bearing Dia" },
     { id: "dim-dia-3", type: "dimension", x1: 240, y1: 100, x2: 240, y2: 260, value: "", label: "Front Collar Dia" },
-    { id: "dim-dia-4", type: "dimension", x1: 420, y1: 120, x2: 420, y2: 240, value: "", label: "Rotor Core Dia" },
-    { id: "dim-dia-5", type: "dimension", x1: 600, y1: 142, x2: 600, y2: 218, value: "", label: "Back Bearing Dia" },
-    { id: "dim-dia-6", type: "dimension", x1: 660, y1: 153, x2: 660, y2: 207, value: "", label: "Back Collar Dia" },
-    { id: "dim-dia-7", type: "dimension", x1: 715, y1: 162, x2: 715, y2: 198, value: "", label: "Back Ext Dia" },
+    { id: "dim-dia-4", type: "dimension", x1: 350, y1: 120, x2: 350, y2: 240, value: "", label: "Rotor Core Dia" },
+    { id: "dim-dia-5", type: "dimension", x1: 460, y1: 142, x2: 460, y2: 218, value: "", label: "Back Bearing Dia" },
+    { id: "dim-dia-6", type: "dimension", x1: 520, y1: 153, x2: 520, y2: 207, value: "", label: "Back Collar Dia" },
+    { id: "dim-dia-7", type: "dimension", x1: 575, y1: 162, x2: 575, y2: 198, value: "", label: "Back Ext Dia" },
     { id: "text-front", type: "text", x: 75, y: 330, text: "◄ FRONT (DE)", fontSize: 13 },
-    { id: "text-back", type: "text", x: 670, y: 330, text: "BACK (NDE) ►", fontSize: 13 },
+    { id: "text-back", type: "text", x: 535, y: 330, text: "BACK (NDE) ►", fontSize: 13 },
   ],
   createdAt: "2026-10-22T00:00:00.000Z",
   updatedAt: "2026-10-22T00:00:00.000Z",
@@ -376,6 +388,8 @@ export type MotorCostingRecord = {
   frontBearingCover: string;
   backBearingCover: string;
   tbfcLabel?: string;
+  itemLabels?: CostItemLabels;
+  itemDetails?: CostItemDetails;
   items: CostItems;
   totalAmount: number;
   adjustmentHistory?: PriceAdjustmentHistoryEntry[];

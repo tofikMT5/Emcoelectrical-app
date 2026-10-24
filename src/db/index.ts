@@ -14,6 +14,8 @@ import {
   SHAFT_PROFILE_2_TEMPLATE,
   SHAFT_PROFILE_3_TEMPLATE,
   type CostItems,
+  type CostItemDetails,
+  type CostItemLabels,
   type DrawingElement,
   type MotorCostingRecord,
   type PriceAdjustmentHistoryEntry,
@@ -106,7 +108,7 @@ async function ensureTables(): Promise<void> {
           body_length VARCHAR(80) NOT NULL DEFAULT '',
           front_bearing_cover VARCHAR(80) NOT NULL DEFAULT '',
           back_bearing_cover VARCHAR(80) NOT NULL DEFAULT '',
-          tbfc_label VARCHAR(100) NOT NULL DEFAULT 'T.B.F.C.',
+          tbfc_label VARCHAR(100) NOT NULL DEFAULT 'T.E.F.C.',
           cost_items TEXT NOT NULL DEFAULT '{}',
           total_amount VARCHAR(40) NOT NULL DEFAULT '0',
           adjustment_history TEXT NOT NULL DEFAULT '[]',
@@ -116,6 +118,10 @@ async function ensureTables(): Promise<void> {
           deleted_at TIMESTAMPTZ DEFAULT NULL
         );
         ALTER TABLE motor_costing_records ADD COLUMN IF NOT EXISTS drawing_data TEXT DEFAULT '';
+        ALTER TABLE motor_costing_records ADD COLUMN IF NOT EXISTS item_labels TEXT DEFAULT '{}';
+        ALTER TABLE motor_costing_records ADD COLUMN IF NOT EXISTS item_details TEXT DEFAULT '{}';
+        ALTER TABLE motor_costing_records ALTER COLUMN tbfc_label SET DEFAULT 'T.E.F.C.';
+        UPDATE motor_costing_records SET tbfc_label = 'T.E.F.C.' WHERE tbfc_label = 'T.B.F.C.';
         CREATE TABLE IF NOT EXISTS drawing_templates (
           id VARCHAR(120) PRIMARY KEY,
           name VARCHAR(200) NOT NULL,
@@ -611,6 +617,28 @@ function serializePgCostingRecord(row: typeof motorCostingRecords.$inferSelect):
     }
   }
 
+  let itemLabels: CostItemLabels = {};
+  try {
+    const rawLabels = (row as unknown as { itemLabels?: string }).itemLabels;
+    const parsed = typeof rawLabels === "string" ? JSON.parse(rawLabels) : rawLabels;
+    if (parsed && typeof parsed === "object") {
+      itemLabels = parsed;
+    }
+  } catch {
+    // fallback
+  }
+
+  let itemDetails: CostItemDetails = {};
+  try {
+    const rawDetails = (row as unknown as { itemDetails?: string }).itemDetails;
+    const parsed = typeof rawDetails === "string" ? JSON.parse(rawDetails) : rawDetails;
+    if (parsed && typeof parsed === "object") {
+      itemDetails = parsed;
+    }
+  } catch {
+    // fallback
+  }
+
   return {
     id: row.id,
     motorRecordId: row.motorRecordId || null,
@@ -625,7 +653,9 @@ function serializePgCostingRecord(row: typeof motorCostingRecords.$inferSelect):
     bodyLength: row.bodyLength || "",
     frontBearingCover: row.frontBearingCover || "",
     backBearingCover: row.backBearingCover || "",
-    tbfcLabel: row.tbfcLabel || "T.B.F.C.",
+    tbfcLabel: (row.tbfcLabel === "T.B.F.C." || !row.tbfcLabel) ? "T.E.F.C." : row.tbfcLabel,
+    itemLabels,
+    itemDetails,
     items,
     totalAmount: Number(row.totalAmount) || calculateCostTotal(items),
     adjustmentHistory,
@@ -749,6 +779,7 @@ export async function insertCostingRecord(
 
   const newRecord: MotorCostingRecord = {
     ...input,
+    tbfcLabel: (input.tbfcLabel === "T.B.F.C." || !input.tbfcLabel) ? "T.E.F.C." : input.tbfcLabel,
     id,
     totalAmount,
     adjustmentHistory: input.adjustmentHistory || [],
@@ -776,7 +807,9 @@ export async function insertCostingRecord(
           bodyLength: input.bodyLength || "",
           frontBearingCover: input.frontBearingCover || "",
           backBearingCover: input.backBearingCover || "",
-          tbfcLabel: input.tbfcLabel || "T.B.F.C.",
+          tbfcLabel: (input.tbfcLabel === "T.B.F.C." || !input.tbfcLabel) ? "T.E.F.C." : input.tbfcLabel,
+          itemLabels: JSON.stringify(input.itemLabels || {}),
+          itemDetails: JSON.stringify(input.itemDetails || {}),
           costItems: JSON.stringify(input.items || emptyCostItems()),
           totalAmount: String(totalAmount),
           adjustmentHistory: JSON.stringify(input.adjustmentHistory || []),
@@ -830,7 +863,11 @@ export async function updateCostingRecord(
       if (input.bodyLength !== undefined) updateData.bodyLength = input.bodyLength;
       if (input.frontBearingCover !== undefined) updateData.frontBearingCover = input.frontBearingCover;
       if (input.backBearingCover !== undefined) updateData.backBearingCover = input.backBearingCover;
-      if (input.tbfcLabel !== undefined) updateData.tbfcLabel = input.tbfcLabel;
+      if (input.tbfcLabel !== undefined) {
+        updateData.tbfcLabel = input.tbfcLabel === "T.B.F.C." ? "T.E.F.C." : input.tbfcLabel;
+      }
+      if (input.itemLabels !== undefined) updateData.itemLabels = JSON.stringify(input.itemLabels);
+      if (input.itemDetails !== undefined) updateData.itemDetails = JSON.stringify(input.itemDetails);
       if (input.items !== undefined) updateData.costItems = JSON.stringify(mergedItems);
       updateData.totalAmount = String(totalAmount);
       if (input.adjustmentHistory !== undefined) {
@@ -1078,7 +1115,9 @@ export async function bulkImportCostingRecords(
               bodyLength: r.bodyLength || "",
               frontBearingCover: r.frontBearingCover || "",
               backBearingCover: r.backBearingCover || "",
-              tbfcLabel: r.tbfcLabel || "T.B.F.C.",
+              tbfcLabel: (r.tbfcLabel === "T.B.F.C." || !r.tbfcLabel) ? "T.E.F.C." : r.tbfcLabel,
+              itemLabels: JSON.stringify(r.itemLabels || {}),
+              itemDetails: JSON.stringify(r.itemDetails || {}),
               costItems: JSON.stringify(r.items || emptyCostItems()),
               totalAmount: String(r.totalAmount),
               adjustmentHistory: JSON.stringify(r.adjustmentHistory || []),

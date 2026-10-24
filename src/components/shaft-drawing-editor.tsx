@@ -10,6 +10,106 @@ import {
 
 // ─── SVG VIEWER / RENDERER COMPONENT ──────────────────────────────────────────
 
+/**
+ * Computes tight artwork bounds encompassing all lines, dimensions, ticks, pills,
+ * and text callouts, with comfortable padding so no elements touch card edges.
+ * Scales proportionally across templates, screen sizes, and print views without distortion.
+ */
+export function computeShaftArtworkViewBox(
+  drawing?: ShaftDrawing | null,
+  padX = 22,
+  padY = 16
+): { vbMinX: number; vbMinY: number; vbWidth: number; vbHeight: number } {
+  const fallbackWidth = drawing?.viewBoxWidth || 800;
+  const fallbackHeight = drawing?.viewBoxHeight || 360;
+
+  if (!drawing || !drawing.elements || drawing.elements.length === 0) {
+    return { vbMinX: 0, vbMinY: 0, vbWidth: fallbackWidth, vbHeight: fallbackHeight };
+  }
+
+  const dimValues = drawing.dimensionValues || {};
+  const dimLabels = drawing.dimensionLabels || {};
+
+  let minX = Infinity;
+  let maxX = -Infinity;
+  let minY = Infinity;
+  let maxY = -Infinity;
+
+  for (const el of drawing.elements) {
+    if (el.type === "line") {
+      const sw = (el.strokeWidth || 2) / 2;
+      minX = Math.min(minX, el.x1 - sw, el.x2 - sw);
+      maxX = Math.max(maxX, el.x1 + sw, el.x2 + sw);
+      minY = Math.min(minY, el.y1 - sw, el.y2 - sw);
+      maxY = Math.max(maxY, el.y1 + sw, el.y2 + sw);
+    } else if (el.type === "dimension") {
+      const rawValue = dimValues[el.id] !== undefined ? dimValues[el.id] : el.value || "";
+      const rawLabel = dimLabels[el.id] !== undefined ? dimLabels[el.id] : el.label || "";
+      const isVertical = Math.abs(el.x1 - el.x2) < 2;
+
+      const trimmedVal = String(rawValue).trim();
+      const displayText = trimmedVal
+        ? (trimmedVal.toLowerCase().endsWith("mm") ? trimmedVal : `${trimmedVal} mm`)
+        : "— mm";
+      const subText = rawLabel ? String(rawLabel).trim() : "";
+
+      if (isVertical) {
+        const x = el.x1;
+        const yLow = Math.min(el.y1, el.y2);
+        const yHigh = Math.max(el.y1, el.y2);
+        const textChars = Math.max(displayText.length, subText.length);
+        const pillWidth = Math.max(48, Math.min(76, textChars * 6.5 + 10));
+        const halfPill = pillWidth / 2;
+
+        minX = Math.min(minX, x - halfPill, x - 4);
+        maxX = Math.max(maxX, x + halfPill, x + 4);
+        minY = Math.min(minY, yLow);
+        maxY = Math.max(maxY, yHigh);
+      } else {
+        const offset = el.offset || -30;
+        const isBelow = offset > 0;
+        const baseY = isBelow ? Math.max(el.y1, el.y2) : Math.min(el.y1, el.y2);
+        const dimY = baseY + offset;
+        const lineMinX = Math.min(el.x1, el.x2);
+        const lineMaxX = Math.max(el.x1, el.x2);
+        const midX = (lineMinX + lineMaxX) / 2;
+        const pillWidth = Math.max(76, Math.max(displayText.length * 7, subText.length * 6) + 14);
+        const halfPill = pillWidth / 2;
+
+        minX = Math.min(minX, lineMinX, midX - halfPill);
+        maxX = Math.max(maxX, lineMaxX, midX + halfPill);
+
+        const pillTop = dimY - (subText ? 18 : 11);
+        const pillBottom = pillTop + (subText ? 24 : 16);
+        const extY = isBelow ? dimY + 4 : dimY - 4;
+
+        minY = Math.min(minY, el.y1, el.y2, dimY, pillTop, extY);
+        maxY = Math.max(maxY, el.y1, el.y2, dimY, pillBottom, extY);
+      }
+    } else if (el.type === "text") {
+      const fs = el.fontSize || 12;
+      const text = String(el.text || "");
+      const halfWidth = Math.max(20, (text.length * fs * 0.7) / 2);
+
+      minX = Math.min(minX, el.x - halfWidth);
+      maxX = Math.max(maxX, el.x + halfWidth);
+      minY = Math.min(minY, el.y - fs);
+      maxY = Math.max(maxY, el.y + 4);
+    }
+  }
+
+  if (!Number.isFinite(minX) || !Number.isFinite(maxX)) {
+    return { vbMinX: 0, vbMinY: 0, vbWidth: fallbackWidth, vbHeight: fallbackHeight };
+  }
+
+  const vbMinX = Math.floor(minX - padX);
+  const vbMinY = Math.floor(minY - padY);
+  const vbWidth = Math.ceil(maxX + padX) - vbMinX;
+  const vbHeight = Math.ceil(maxY + padY) - vbMinY;
+
+  return { vbMinX, vbMinY, vbWidth, vbHeight };
+}
+
 export function ShaftDrawingSVG({
   drawing,
   className = "",
@@ -20,6 +120,10 @@ export function ShaftDrawingSVG({
   onSelectElement?: (id: string | null) => void;
   className?: string;
 }) {
+  const { vbMinX, vbMinY, vbWidth, vbHeight } = useMemo(() => {
+    return computeShaftArtworkViewBox(drawing);
+  }, [drawing]);
+
   if (!drawing || !drawing.elements || drawing.elements.length === 0) {
     return (
       <div className="shaft-empty-preview">
@@ -28,14 +132,12 @@ export function ShaftDrawingSVG({
     );
   }
 
-  const viewBoxWidth = drawing.viewBoxWidth || 800;
-  const viewBoxHeight = drawing.viewBoxHeight || 360;
   const dimValues = drawing.dimensionValues || {};
   const dimLabels = drawing.dimensionLabels || {};
 
   return (
     <svg
-      viewBox={`0 0 ${viewBoxWidth} ${viewBoxHeight}`}
+      viewBox={`${vbMinX} ${vbMinY} ${vbWidth} ${vbHeight}`}
       className={`shaft-svg-canvas ${className}`}
       preserveAspectRatio="xMidYMid meet"
       xmlns="http://www.w3.org/2000/svg"
@@ -68,10 +170,10 @@ export function ShaftDrawingSVG({
 
       {/* Clean technical white sheet */}
       <rect
-        x="0"
-        y="0"
-        width={viewBoxWidth}
-        height={viewBoxHeight}
+        x={vbMinX + 0.5}
+        y={vbMinY + 0.5}
+        width={vbWidth - 1}
+        height={vbHeight - 1}
         fill="#ffffff"
         stroke="#cbd5e1"
         strokeWidth="1"

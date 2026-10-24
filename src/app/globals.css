@@ -300,14 +300,358 @@ button:disabled { cursor: not-allowed; opacity: .62; }
 
 /* COSTING FORM & ITEMS GRID */
 .costing-items-grid { grid-template-columns: 1fr; gap: 10px; }
-.cost-input-card { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 10px 14px; border: 1px solid #dce5ef; border-radius: 8px; background: #fbfdff; }
-.cost-input-label-area { flex: 1; min-width: 0; }
-.tbfc-label-wrapper { display: flex; flex-direction: column; gap: 4px; }
-.tbfc-label-input { min-height: 32px; font-size: 12px; font-weight: 750; color: #1b4b7a; width: 130px; }
-.tbfc-note { color: #8595a6; font-size: 10.5px; }
-.currency-input-wrapper { position: relative; width: 170px; flex-shrink: 0; }
-.currency-prefix { position: absolute; left: 11px; top: 12px; font-size: 14px; font-weight: 750; color: #59738c; pointer-events: none; }
-.currency-input { padding-left: 28px; text-align: right; font-size: 14px; font-weight: 750; color: #10253f; }
+.cost-input-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 14px;
+  border: 1px solid #dce5ef;
+  border-radius: 8px;
+  background: #fbfdff;
+  overflow: hidden;
+  transition: border-color .15s, box-shadow .15s;
+}
+.cost-input-card:hover { border-color: #bed3e8; }
+
+/* Label & Rename area */
+.cost-input-label-area {
+  flex: 1 1 150px;
+  min-width: 130px;
+}
+.cost-label-title-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.cost-item-name {
+  font-size: 13.5px;
+  font-weight: 700;
+  color: #10253f;
+  line-height: 1.3;
+}
+.rename-item-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  background: transparent;
+  color: #70869d;
+  cursor: pointer;
+  transition: all .15s;
+}
+.rename-item-btn:hover {
+  background: #eaf3fb;
+  color: #1466b8;
+  border-color: #c5dcfa;
+}
+.rename-item-form {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.rename-item-input {
+  min-height: 30px;
+  padding: 3px 8px;
+  font-size: 13px;
+  font-weight: 700;
+  width: 140px;
+}
+.rename-action-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 4px;
+  border: 1px solid #cbd8e5;
+  background: #fff;
+  font-size: 12px;
+  font-weight: 800;
+  cursor: pointer;
+  padding: 0;
+}
+.rename-action-btn.save {
+  color: #15803d;
+  border-color: #86efac;
+  background: #f0fdf4;
+}
+.rename-action-btn.cancel {
+  color: #b91c1c;
+  border-color: #fca5a5;
+  background: #fef2f2;
+}
+
+/* Quantity & Unit area */
+.cost-qty-unit-area {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+.cost-qty-input {
+  width: 68px;
+  min-height: 38px;
+  text-align: right;
+  font-size: 13px;
+  font-weight: 700;
+  color: #10253f;
+  padding: 4px 8px;
+}
+.cost-unit-select {
+  width: 76px;
+  min-height: 38px;
+  padding: 4px 6px;
+  font-size: 12.5px;
+  font-weight: 700;
+  color: #274768;
+  background: #f4f8fc;
+  border: 1px solid #c9d8e7;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.cost-unit-custom-input {
+  width: 64px;
+  min-height: 38px;
+  padding: 4px 6px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+/* Rate & Line Amount area */
+.cost-rate-area {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+.currency-input-wrapper {
+  position: relative;
+  width: 150px;
+  max-width: 100%;
+  flex-shrink: 0;
+}
+.currency-prefix {
+  position: absolute;
+  left: 9px;
+  top: 10px;
+  font-size: 13px;
+  font-weight: 750;
+  color: #59738c;
+  pointer-events: none;
+}
+.currency-input {
+  padding-left: 22px;
+  padding-right: 28px;
+  text-align: right;
+  font-size: 13.5px;
+  font-weight: 750;
+  color: #10253f;
+  min-height: 38px;
+}
+.calc-open-btn {
+  position: absolute;
+  right: 5px;
+  top: 7px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: #64748b;
+  cursor: pointer;
+  transition: all .15s;
+}
+.calc-open-btn:hover {
+  background: #e2e8f0;
+  color: #0284c7;
+}
+
+/* COMPACT INLINE CALCULATOR MODAL */
+.inline-calc-card {
+  width: 100%;
+  max-width: 380px;
+  background: #fff;
+  border-radius: 12px;
+  box-shadow: 0 20px 45px rgba(10, 25, 45, .25);
+  overflow: hidden;
+  border: 1px solid #d9e2eb;
+}
+.calc-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 18px;
+  background: #f8fafc;
+  border-bottom: 1px solid #e2e8f0;
+}
+.calc-eyebrow {
+  display: block;
+  font-size: 10.5px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  color: var(--blue);
+}
+.calc-card-head h4 {
+  margin: 2px 0 0;
+  font-size: 16px;
+  color: var(--navy);
+}
+.calc-body {
+  padding: 16px 18px 20px;
+}
+.calc-expr-input {
+  font-size: 15px;
+  font-weight: 750;
+  color: #0f172a;
+  letter-spacing: .02em;
+}
+
+.calc-preview-box {
+  margin-top: 10px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  font-size: 13px;
+  transition: all .15s;
+}
+.calc-preview-box.valid {
+  background: #f0fdf4;
+  border: 1px solid #bbf7d0;
+  color: #166534;
+}
+.calc-preview-box.invalid {
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  color: #991b1b;
+}
+.calc-preview-box.idle {
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  color: #64748b;
+  font-size: 12px;
+}
+.calc-preview-top {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+}
+.calc-preview-label {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  color: #15803d;
+}
+.calc-preview-total {
+  font-size: 18px;
+  font-weight: 800;
+  color: #166534;
+}
+.calc-preview-detail {
+  font-size: 12px;
+  color: #15803d;
+  margin-top: 3px;
+}
+
+/* Keypad Grid */
+.calc-keypad {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 6px;
+  margin-top: 14px;
+}
+.calc-key {
+  min-height: 38px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  background: #f8fafc;
+  color: #1e293b;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background .12s, transform .1s;
+}
+.calc-key:hover {
+  background: #e2e8f0;
+}
+.calc-key:active {
+  transform: translateY(1px);
+}
+.calc-key.op {
+  background: #eff6ff;
+  border-color: #bfdbfe;
+  color: #1d4ed8;
+  font-weight: 800;
+}
+.calc-key.op:hover {
+  background: #dbeafe;
+}
+.calc-key.unit {
+  background: #f1f5f9;
+  border-color: #cbd5e1;
+  color: #0f766e;
+  font-size: 12px;
+  font-weight: 750;
+}
+.calc-key.danger {
+  background: #fef2f2;
+  border-color: #fecaca;
+  color: #dc2626;
+  font-weight: 800;
+}
+
+.calc-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 16px;
+}
+.calc-actions .button {
+  flex: 1;
+}
+
+@media (max-width: 640px) {
+  .cost-input-card {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+  }
+  .cost-input-label-area {
+    width: 100%;
+  }
+  .cost-qty-unit-area {
+    width: 100%;
+    justify-content: space-between;
+  }
+  .cost-qty-input {
+    flex: 1;
+  }
+  .cost-unit-select {
+    flex: 1;
+  }
+  .cost-rate-area {
+    width: 100%;
+    justify-content: space-between;
+  }
+  .currency-input-wrapper {
+    flex: 1;
+    width: auto;
+  }
+  .shaft-svg-box {
+    padding: 8px 4px;
+  }
+}
 
 .live-total-bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 14px; margin-top: 18px; padding: 16px 20px; border-radius: 9px; background: #10253f; color: #fff; }
 .live-total-title { display: block; font-size: 13px; font-weight: 800; letter-spacing: .02em; }
@@ -622,14 +966,15 @@ button:disabled { cursor: not-allowed; opacity: .62; }
   display: flex;
   justify-content: center;
   align-items: center;
+  overflow: hidden;
 }
 
 .shaft-svg-canvas {
   width: 100%;
-  max-width: 860px;
+  max-width: 900px;
   height: auto;
-  aspect-ratio: 800 / 360;
   display: block;
+  margin: 0 auto;
 }
 
 .shaft-empty-preview {

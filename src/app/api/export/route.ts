@@ -79,7 +79,7 @@ function costingRecordsToCsv(records: MotorCostingRecord[]): string {
       csvValue(rec.bodyLength),
       csvValue(rec.frontBearingCover),
       csvValue(rec.backBearingCover),
-      csvValue(rec.tbfcLabel || "T.B.F.C."),
+      csvValue((rec.tbfcLabel === "T.B.F.C." || !rec.tbfcLabel) ? "T.E.F.C." : rec.tbfcLabel),
       ...COST_ITEM_KEYS.map((k) => csvValue(rec.items?.[k] ?? 0)),
       csvValue(rec.totalAmount),
       csvValue(rec.createdAt),
