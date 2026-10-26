@@ -1262,91 +1262,94 @@ function formatLineAmount(val: number | string | undefined): string {
                     )}
                   </div>
 
-                  {/* QUANTITY & UNIT AREA */}
-                  <div className="cost-qty-unit-area">
-                    <input
-                      type="number"
-                      min="0"
-                      step="any"
-                      className="input cost-qty-input"
-                      value={currentQty}
-                      onChange={(e) => handleQtyChange(key, e.target.value)}
-                      placeholder="Qty"
-                      title="Quantity (e.g. 15)"
-                    />
-                    <select
-                      className="input cost-unit-select"
-                      value={isStandardUnit ? currentUnit : "__custom__"}
-                      onChange={(e) => {
-                        if (e.target.value === "__custom__") {
-                          handleUnitChange(key, "");
-                        } else {
-                          handleUnitChange(key, e.target.value);
-                        }
-                      }}
-                      title="Select unit of measurement"
-                    >
-                      {COMMON_COST_UNITS.map((u) => (
-                        <option key={u} value={u}>
-                          {u}
-                        </option>
-                      ))}
-                      <option value="__custom__">Custom…</option>
-                    </select>
-                    {!isStandardUnit && (
+                  {/* CONTROLS AREA (QTY, UNIT & PRICE) */}
+                  <div className="cost-item-controls">
+                    {/* QUANTITY & UNIT AREA */}
+                    <div className="cost-qty-unit-area">
                       <input
-                        type="text"
-                        className="input cost-unit-custom-input"
-                        value={currentUnit}
-                        onChange={(e) => handleUnitChange(key, e.target.value)}
-                        placeholder="Unit"
-                        title="Enter custom unit (e.g. set, coil, box)"
-                        autoFocus
+                        type="number"
+                        min="0"
+                        step="any"
+                        className="input cost-qty-input"
+                        value={currentQty}
+                        onChange={(e) => handleQtyChange(key, e.target.value)}
+                        placeholder="Qty"
+                        title="Quantity (e.g. 15)"
                       />
-                    )}
-                  </div>
-
-                  {/* PRICE & CALCULATOR AREA */}
-                  <div className="cost-rate-area">
-                    <div className="currency-input-wrapper">
-                      <span className="currency-prefix">₹</span>
-                      <input
-                        type="text"
-                        inputMode="decimal"
-                        className="input currency-input"
-                        value={priceInputs[key] ?? ""}
-                        onChange={(e) => handlePriceChange(key, e.target.value)}
-                        onBlur={() => handlePriceBlur(key)}
-                        onClick={() => openCalculator(key)}
-                        placeholder="0.00"
-                        title="Click to open compact calculator"
-                      />
-                      <button
-                        type="button"
-                        className="calc-open-btn"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          openCalculator(key);
+                      <select
+                        className="input cost-unit-select"
+                        value={isStandardUnit ? currentUnit : "__custom__"}
+                        onChange={(e) => {
+                          if (e.target.value === "__custom__") {
+                            handleUnitChange(key, "");
+                          } else {
+                            handleUnitChange(key, e.target.value);
+                          }
                         }}
-                        title="Open calculator"
-                        aria-label={`Open calculator for ${currentLabel}`}
+                        title="Select unit of measurement"
                       >
-                        <svg
-                          width="14"
-                          height="14"
-                          viewBox="0 0 24 24"
-                          fill="none"
-                          stroke="currentColor"
-                          strokeWidth="2"
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
+                        {COMMON_COST_UNITS.map((u) => (
+                          <option key={u} value={u}>
+                            {u}
+                          </option>
+                        ))}
+                        <option value="__custom__">Custom…</option>
+                      </select>
+                      {!isStandardUnit && (
+                        <input
+                          type="text"
+                          className="input cost-unit-custom-input"
+                          value={currentUnit}
+                          onChange={(e) => handleUnitChange(key, e.target.value)}
+                          placeholder="Unit"
+                          title="Enter custom unit (e.g. set, coil, box)"
+                          autoFocus
+                        />
+                      )}
+                    </div>
+
+                    {/* PRICE & CALCULATOR AREA */}
+                    <div className="cost-rate-area">
+                      <div className="currency-input-wrapper">
+                        <span className="currency-prefix">₹</span>
+                        <input
+                          type="text"
+                          inputMode="decimal"
+                          className="input currency-input"
+                          value={priceInputs[key] ?? ""}
+                          onChange={(e) => handlePriceChange(key, e.target.value)}
+                          onBlur={() => handlePriceBlur(key)}
+                          onClick={() => openCalculator(key)}
+                          placeholder="0.00"
+                          title="Click to open compact calculator"
+                        />
+                        <button
+                          type="button"
+                          className="calc-open-btn"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            openCalculator(key);
+                          }}
+                          title="Open calculator"
+                          aria-label={`Open calculator for ${currentLabel}`}
                         >
-                          <rect x="4" y="2" width="16" height="20" rx="2" />
-                          <line x1="8" y1="6" x2="16" y2="6" />
-                          <line x1="16" y1="14" x2="16" y2="18" />
-                          <path d="M8 10h.01M12 10h.01M16 10h.01M8 14h.01M12 14h.01M8 18h.01M12 18h.01" />
-                        </svg>
-                      </button>
+                          <svg
+                            width="14"
+                            height="14"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="2"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                          >
+                            <rect x="4" y="2" width="16" height="20" rx="2" />
+                            <line x1="8" y1="6" x2="16" y2="6" />
+                            <line x1="16" y1="14" x2="16" y2="18" />
+                            <path d="M8 10h.01M12 10h.01M16 10h.01M8 14h.01M12 14h.01M8 18h.01M12 18h.01" />
+                          </svg>
+                        </button>
+                      </div>
                     </div>
                   </div>
                 </div>

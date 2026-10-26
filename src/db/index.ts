@@ -165,17 +165,8 @@ async function readLocalData(): Promise<StorageData> {
         : [...DEFAULT_SHAFT_TEMPLATES];
 
     for (const def of DEFAULT_SHAFT_TEMPLATES) {
-      const idx = loadedTemplates.findIndex(
-        (t) => t.id === def.id || t.name.toLowerCase().trim() === def.name.toLowerCase().trim(),
-      );
-      if (idx !== -1) {
-        loadedTemplates[idx] = {
-          ...loadedTemplates[idx],
-          elements: def.elements,
-          viewBoxWidth: def.viewBoxWidth,
-          viewBoxHeight: def.viewBoxHeight,
-        };
-      } else {
+      const idx = loadedTemplates.findIndex((t) => t.id === def.id);
+      if (idx === -1) {
         loadedTemplates.push(def);
       }
     }
@@ -712,7 +703,17 @@ export async function findCostingRecords(
         .where(conditions.length ? and(...conditions) : undefined)
         .orderBy(desc(motorCostingRecords.updatedAt));
 
-      return rows.map(serializePgCostingRecord);
+      const records = rows.map(serializePgCostingRecord);
+      try {
+        const templates = await getDrawingTemplates();
+        const tplMap = new Map(templates.map((t) => [t.id, t.name]));
+        for (const rec of records) {
+          if (rec.drawing?.templateId && tplMap.has(rec.drawing.templateId)) {
+            rec.drawing.templateName = tplMap.get(rec.drawing.templateId)!;
+          }
+        }
+      } catch {}
+      return records;
     } catch (err) {
       console.warn("PostgreSQL findCostingRecords failed, falling back to local storage:", err);
     }
@@ -738,6 +739,16 @@ export async function findCostingRecords(
     );
   }
 
+  try {
+    const templates = await getDrawingTemplates();
+    const tplMap = new Map(templates.map((t) => [t.id, t.name]));
+    for (const rec of matches) {
+      if (rec.drawing?.templateId && tplMap.has(rec.drawing.templateId)) {
+        rec.drawing.templateName = tplMap.get(rec.drawing.templateId)!;
+      }
+    }
+  } catch {}
+
   return [...matches].sort(
     (a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime(),
   );
@@ -754,7 +765,14 @@ export async function findCostingById(
         ? eq(motorCostingRecords.id, id)
         : and(eq(motorCostingRecords.id, id), isNull(motorCostingRecords.deletedAt))!;
       const [record] = await db.select().from(motorCostingRecords).where(condition);
-      if (record) return serializePgCostingRecord(record);
+      if (record) {
+        const serialized = serializePgCostingRecord(record);
+        if (serialized.drawing?.templateId) {
+          const tpl = await getDrawingTemplateById(serialized.drawing.templateId);
+          if (tpl) serialized.drawing.templateName = tpl.name;
+        }
+        return serialized;
+      }
     } catch (err) {
       console.warn("PostgreSQL findCostingById failed, falling back to local storage:", err);
     }
@@ -762,9 +780,13 @@ export async function findCostingById(
 
   const data = await readLocalData();
   const list = data.costingRecords || [];
-  return (
-    list.find((r) => r.id === id && (includeDeleted || !r.deletedAt)) ?? null
-  );
+  const found =
+    list.find((r) => r.id === id && (includeDeleted || !r.deletedAt)) ?? null;
+  if (found && found.drawing?.templateId) {
+    const tpl = await getDrawingTemplateById(found.drawing.templateId);
+    if (tpl) found.drawing.templateName = tpl.name;
+  }
+  return found;
 }
 
 export async function insertCostingRecord(
@@ -818,7 +840,14 @@ export async function insertCostingRecord(
           updatedAt: new Date(now),
         })
         .returning();
-      if (saved) return serializePgCostingRecord(saved);
+      if (saved) {
+        const serialized = serializePgCostingRecord(saved);
+        if (serialized.drawing?.templateId) {
+          const tpl = await getDrawingTemplateById(serialized.drawing.templateId);
+          if (tpl) serialized.drawing.templateName = tpl.name;
+        }
+        return serialized;
+      }
     } catch (err) {
       console.warn("PostgreSQL insertCosting failed, falling back to local storage:", err);
     }
@@ -828,6 +857,10 @@ export async function insertCostingRecord(
   if (!data.costingRecords) data.costingRecords = [];
   data.costingRecords.push(newRecord);
   await writeLocalData(data);
+  if (newRecord.drawing?.templateId) {
+    const tpl = await getDrawingTemplateById(newRecord.drawing.templateId);
+    if (tpl) newRecord.drawing.templateName = tpl.name;
+  }
   return newRecord;
 }
 
@@ -887,7 +920,14 @@ export async function updateCostingRecord(
         .set(updateData)
         .where(eq(motorCostingRecords.id, id))
         .returning();
-      if (saved) return serializePgCostingRecord(saved);
+      if (saved) {
+        const serialized = serializePgCostingRecord(saved);
+        if (serialized.drawing?.templateId) {
+          const tpl = await getDrawingTemplateById(serialized.drawing.templateId);
+          if (tpl) serialized.drawing.templateName = tpl.name;
+        }
+        return serialized;
+      }
     } catch (err) {
       console.warn("PostgreSQL updateCosting failed, falling back to local storage:", err);
     }
@@ -924,6 +964,10 @@ export async function updateCostingRecord(
   list[index] = updated;
   data.costingRecords = list;
   await writeLocalData(data);
+  if (updated.drawing?.templateId) {
+    const tpl = await getDrawingTemplateById(updated.drawing.templateId);
+    if (tpl) updated.drawing.templateName = tpl.name;
+  }
   return updated;
 }
 
@@ -1249,6 +1293,68 @@ export async function checkHealth(): Promise<boolean> {
   }
 }
 
+export async function syncTemplateNameInCostingRecords(
+  templateId: string,
+  newName: string,
+): Promise<void> {
+  if (!templateId || !newName) return;
+  if (db) {
+    try {
+      await ensureTables();
+      const rows = await db
+        .select({ id: motorCostingRecords.id, drawingData: motorCostingRecords.drawingData })
+        .from(motorCostingRecords)
+        .where(isNotNull(motorCostingRecords.drawingData));
+
+      for (const row of rows) {
+        if (!row.drawingData) continue;
+        try {
+          const parsed = JSON.parse(row.drawingData);
+          if (parsed && typeof parsed === "object" && parsed.templateId === templateId) {
+            if (parsed.templateName !== newName) {
+              parsed.templateName = newName;
+              await db
+                .update(motorCostingRecords)
+                .set({
+                  drawingData: JSON.stringify(parsed),
+                })
+                .where(eq(motorCostingRecords.id, row.id));
+            }
+          }
+        } catch {}
+      }
+    } catch (err) {
+      console.warn("PostgreSQL syncTemplateNameInCostingRecords failed:", err);
+    }
+  }
+
+  try {
+    const data = await readLocalData();
+    let modified = false;
+    for (const rec of data.costingRecords || []) {
+      if (rec.drawing?.templateId === templateId && rec.drawing.templateName !== newName) {
+        rec.drawing.templateName = newName;
+        modified = true;
+      }
+      if (rec.drawingData) {
+        try {
+          const parsed = JSON.parse(rec.drawingData);
+          if (parsed && parsed.templateId === templateId && parsed.templateName !== newName) {
+            parsed.templateName = newName;
+            rec.drawingData = JSON.stringify(parsed);
+            modified = true;
+          }
+        } catch {}
+      }
+    }
+    if (modified) {
+      await writeLocalData(data);
+    }
+  } catch (err) {
+    console.warn("Local syncTemplateNameInCostingRecords failed:", err);
+  }
+}
+
 export async function getDrawingTemplates(): Promise<ShaftDrawingTemplate[]> {
   if (db) {
     try {
@@ -1260,25 +1366,8 @@ export async function getDrawingTemplates(): Promise<ShaftDrawingTemplate[]> {
 
       let hasNewSeed = false;
       for (const def of DEFAULT_SHAFT_TEMPLATES) {
-        const existing = rows.find(
-          (r) => r.id === def.id || r.name.toLowerCase().trim() === def.name.toLowerCase().trim(),
-        );
-        if (existing) {
-          try {
-            await db
-              .update(drawingTemplates)
-              .set({
-                data: JSON.stringify({
-                  elements: def.elements,
-                  viewBoxWidth: def.viewBoxWidth,
-                  viewBoxHeight: def.viewBoxHeight,
-                }),
-                updatedAt: new Date(),
-              })
-              .where(eq(drawingTemplates.id, existing.id));
-            hasNewSeed = true;
-          } catch {}
-        } else {
+        const existing = rows.find((r) => r.id === def.id);
+        if (!existing) {
           try {
             await db
               .insert(drawingTemplates)
@@ -1313,9 +1402,11 @@ export async function getDrawingTemplates(): Promise<ShaftDrawingTemplate[]> {
           if (r.data) parsed = JSON.parse(r.data);
         } catch {}
         const defTpl = DEFAULT_SHAFT_TEMPLATES.find((t) => t.id === r.id);
-        const resolvedElements = defTpl ? defTpl.elements : (Array.isArray(parsed.elements) ? parsed.elements : DEFAULT_SHAFT_TEMPLATE.elements);
-        const resolvedWidth = defTpl ? defTpl.viewBoxWidth : (parsed.viewBoxWidth || DEFAULT_SHAFT_TEMPLATE.viewBoxWidth);
-        const resolvedHeight = defTpl ? defTpl.viewBoxHeight : (parsed.viewBoxHeight || DEFAULT_SHAFT_TEMPLATE.viewBoxHeight);
+        const resolvedElements = Array.isArray(parsed.elements) && parsed.elements.length > 0
+          ? parsed.elements
+          : (defTpl ? defTpl.elements : DEFAULT_SHAFT_TEMPLATE.elements);
+        const resolvedWidth = parsed.viewBoxWidth || (defTpl ? defTpl.viewBoxWidth : DEFAULT_SHAFT_TEMPLATE.viewBoxWidth);
+        const resolvedHeight = parsed.viewBoxHeight || (defTpl ? defTpl.viewBoxHeight : DEFAULT_SHAFT_TEMPLATE.viewBoxHeight);
         return {
           id: r.id,
           name: r.name,
@@ -1333,23 +1424,16 @@ export async function getDrawingTemplates(): Promise<ShaftDrawingTemplate[]> {
   }
 
   const data = await readLocalData();
-  const list = data.drawingTemplates || [...DEFAULT_SHAFT_TEMPLATES];
+  const list = data.drawingTemplates && data.drawingTemplates.length > 0 ? data.drawingTemplates : [...DEFAULT_SHAFT_TEMPLATES];
   let modified = false;
   for (const def of DEFAULT_SHAFT_TEMPLATES) {
-    const idx = list.findIndex(
-      (t) => t.id === def.id || t.name.toLowerCase().trim() === def.name.toLowerCase().trim(),
-    );
-    if (idx >= 0) {
-      list[idx].elements = def.elements;
-      list[idx].viewBoxWidth = def.viewBoxWidth;
-      list[idx].viewBoxHeight = def.viewBoxHeight;
-      modified = true;
-    } else {
+    const idx = list.findIndex((t) => t.id === def.id);
+    if (idx === -1) {
       list.push(def);
       modified = true;
     }
   }
-  if (modified) {
+  if (modified || !data.drawingTemplates) {
     data.drawingTemplates = list;
     await writeLocalData(data);
   }
@@ -1370,9 +1454,11 @@ export async function getDrawingTemplateById(id: string): Promise<ShaftDrawingTe
           if (row.data) parsed = JSON.parse(row.data);
         } catch {}
         const defTpl = DEFAULT_SHAFT_TEMPLATES.find((t) => t.id === row.id);
-        const resolvedElements = defTpl ? defTpl.elements : (Array.isArray(parsed.elements) ? parsed.elements : DEFAULT_SHAFT_TEMPLATE.elements);
-        const resolvedWidth = defTpl ? defTpl.viewBoxWidth : (parsed.viewBoxWidth || DEFAULT_SHAFT_TEMPLATE.viewBoxWidth);
-        const resolvedHeight = defTpl ? defTpl.viewBoxHeight : (parsed.viewBoxHeight || DEFAULT_SHAFT_TEMPLATE.viewBoxHeight);
+        const resolvedElements = Array.isArray(parsed.elements) && parsed.elements.length > 0
+          ? parsed.elements
+          : (defTpl ? defTpl.elements : DEFAULT_SHAFT_TEMPLATE.elements);
+        const resolvedWidth = parsed.viewBoxWidth || (defTpl ? defTpl.viewBoxWidth : DEFAULT_SHAFT_TEMPLATE.viewBoxWidth);
+        const resolvedHeight = parsed.viewBoxHeight || (defTpl ? defTpl.viewBoxHeight : DEFAULT_SHAFT_TEMPLATE.viewBoxHeight);
         return {
           id: row.id,
           name: row.name,
@@ -1441,6 +1527,7 @@ export async function saveDrawingTemplate(input: {
           .where(eq(drawingTemplates.id, id))
           .returning();
         if (updated) {
+          await syncTemplateNameInCostingRecords(id, templateToSave.name);
           return {
             id: updated.id,
             name: updated.name,
@@ -1465,6 +1552,7 @@ export async function saveDrawingTemplate(input: {
           })
           .returning();
         if (created) {
+          await syncTemplateNameInCostingRecords(id, templateToSave.name);
           return {
             id: created.id,
             name: created.name,
@@ -1483,7 +1571,7 @@ export async function saveDrawingTemplate(input: {
   }
 
   const data = await readLocalData();
-  const list = data.drawingTemplates || [DEFAULT_SHAFT_TEMPLATE];
+  const list = data.drawingTemplates && data.drawingTemplates.length > 0 ? data.drawingTemplates : [...DEFAULT_SHAFT_TEMPLATES];
   const idx = list.findIndex((t) => t.id === id);
   if (idx !== -1) {
     templateToSave.createdAt = list[idx].createdAt;
@@ -1493,6 +1581,7 @@ export async function saveDrawingTemplate(input: {
   }
   data.drawingTemplates = list;
   await writeLocalData(data);
+  await syncTemplateNameInCostingRecords(id, templateToSave.name);
   return templateToSave;
 }
 

@@ -477,10 +477,13 @@ export function CostingShaftSection({
     }
     if (drawing && drawing.elements && drawing.elements.length > 0) {
       if (drawing.templateId) {
-        const tpl = DEFAULT_SHAFT_TEMPLATES.find((t) => t.id === drawing.templateId);
+        const tpl =
+          templates.find((t) => t.id === drawing.templateId) ||
+          DEFAULT_SHAFT_TEMPLATES.find((t) => t.id === drawing.templateId);
         if (tpl) {
           return {
             ...drawing,
+            templateName: tpl.name || drawing.templateName,
             elements: JSON.parse(JSON.stringify(tpl.elements)),
             viewBoxWidth: tpl.viewBoxWidth,
             viewBoxHeight: tpl.viewBoxHeight,
@@ -489,16 +492,49 @@ export function CostingShaftSection({
       }
       return drawing;
     }
+    const defaultTpl =
+      templates.find((t) => t.id === DEFAULT_SHAFT_TEMPLATE.id) || DEFAULT_SHAFT_TEMPLATE;
     return {
-      templateId: DEFAULT_SHAFT_TEMPLATE.id,
-      templateName: DEFAULT_SHAFT_TEMPLATE.name,
-      elements: JSON.parse(JSON.stringify(DEFAULT_SHAFT_TEMPLATE.elements)),
+      templateId: defaultTpl.id,
+      templateName: defaultTpl.name,
+      elements: JSON.parse(JSON.stringify(defaultTpl.elements)),
       dimensionValues: {},
       dimensionLabels: {},
-      viewBoxWidth: DEFAULT_SHAFT_TEMPLATE.viewBoxWidth,
-      viewBoxHeight: DEFAULT_SHAFT_TEMPLATE.viewBoxHeight,
+      viewBoxWidth: defaultTpl.viewBoxWidth,
+      viewBoxHeight: defaultTpl.viewBoxHeight,
     };
-  }, [drawing]);
+  }, [drawing, templates]);
+
+  // Keep active drawing templateName in sync with the master template name from storage
+  useEffect(() => {
+    if (!templates.length) return;
+    const currentId = drawing ? drawing.templateId : DEFAULT_SHAFT_TEMPLATE.id;
+    const tpl = templates.find((t) => t.id === currentId);
+    if (tpl) {
+      if (!drawing) {
+        onChangeDrawing({
+          templateId: tpl.id,
+          templateName: tpl.name,
+          elements: JSON.parse(JSON.stringify(tpl.elements)),
+          dimensionValues: {},
+          dimensionLabels: {},
+          viewBoxWidth: tpl.viewBoxWidth || 800,
+          viewBoxHeight: tpl.viewBoxHeight || 360,
+        });
+      } else if (drawing.templateName !== tpl.name) {
+        onChangeDrawing({
+          ...drawing,
+          templateName: tpl.name,
+        });
+      }
+    }
+  }, [templates, drawing?.templateId, drawing?.templateName]);
+
+  const activeTemplateName = useMemo(() => {
+    if (!currentDrawing?.templateId) return currentDrawing?.templateName || "";
+    const matched = templates.find((t) => t.id === currentDrawing.templateId);
+    return matched?.name || currentDrawing.templateName || "";
+  }, [currentDrawing?.templateId, currentDrawing?.templateName, templates]);
 
   // Select a template from the dropdown
   const handleSelectTemplate = (templateId: string) => {
@@ -514,8 +550,8 @@ export function CostingShaftSection({
         templateId: t.id,
         templateName: t.name,
         elements: JSON.parse(JSON.stringify(t.elements)),
-        dimensionValues: {},
-        dimensionLabels: {},
+        dimensionValues: currentDrawing?.dimensionValues || {},
+        dimensionLabels: currentDrawing?.dimensionLabels || {},
         viewBoxWidth: t.viewBoxWidth || 800,
         viewBoxHeight: t.viewBoxHeight || 360,
       });
@@ -555,7 +591,7 @@ export function CostingShaftSection({
 
   const handleOpenRename = () => {
     if (!currentDrawing?.templateId) return;
-    setRenameDraft(currentDrawing.templateName || "");
+    setRenameDraft(activeTemplateName);
     setRenameError("");
     setRenameModalOpen(true);
   };
@@ -592,14 +628,18 @@ export function CostingShaftSection({
         throw new Error(data.message || "Failed to rename template.");
       }
 
-      await reloadTemplates();
-
-      // Update active drawing templateName in this costing sheet
+      // Update active drawing templateName in this costing sheet immediately
       onChangeDrawing({
         ...currentDrawing,
         templateName: trimmed,
       });
 
+      // Update templates list locally immediately
+      setTemplates((prev) =>
+        prev.map((t) => (t.id === currentDrawing.templateId ? { ...t, name: trimmed } : t)),
+      );
+
+      await reloadTemplates();
       setRenameModalOpen(false);
     } catch (err) {
       setRenameError(err instanceof Error ? err.message : "Failed to rename template.");
@@ -667,7 +707,7 @@ export function CostingShaftSection({
           <div className="shaft-preview-card">
             <div className="shaft-preview-header">
               <span className="shaft-template-badge">
-                {currentDrawing.templateName || "Shaft Profile"}
+                {activeTemplateName || "Shaft Profile"}
               </span>
               <small className="shaft-hint">
                 Thin black outline • mm dimension labels • Included in quotation print & PDF
@@ -805,6 +845,7 @@ export function CostingShaftSection({
 
 export function CostingQuotationDrawingView({
   record,
+  templates: propTemplates,
 }: {
   record: {
     companyName: string;
@@ -816,7 +857,33 @@ export function CostingQuotationDrawingView({
     drawing?: ShaftDrawing | null;
     drawingData?: string | null;
   };
+  templates?: ShaftDrawingTemplate[];
 }) {
+  const [loadedTemplates, setLoadedTemplates] = useState<ShaftDrawingTemplate[]>(propTemplates || []);
+
+  useEffect(() => {
+    if (propTemplates && propTemplates.length > 0) {
+      setLoadedTemplates(propTemplates);
+      return;
+    }
+    let ignore = false;
+    async function fetchTemplates() {
+      try {
+        const res = await fetch("/api/costing/templates");
+        if (res.ok) {
+          const data = await res.json();
+          if (!ignore && Array.isArray(data.templates)) {
+            setLoadedTemplates(data.templates);
+          }
+        }
+      } catch {}
+    }
+    void fetchTemplates();
+    return () => {
+      ignore = true;
+    };
+  }, [propTemplates]);
+
   const drawing = useMemo(() => {
     let resolved: ShaftDrawing | null = null;
     if (record.drawing && record.drawing.elements && record.drawing.elements.length > 0) {
@@ -830,10 +897,13 @@ export function CostingQuotationDrawingView({
       } catch {}
     }
     if (resolved && resolved.templateId) {
-      const tpl = DEFAULT_SHAFT_TEMPLATES.find((t) => t.id === resolved.templateId);
+      const tpl =
+        loadedTemplates.find((t) => t.id === resolved.templateId) ||
+        DEFAULT_SHAFT_TEMPLATES.find((t) => t.id === resolved.templateId);
       if (tpl) {
         return {
           ...resolved,
+          templateName: tpl.name || resolved.templateName,
           elements: JSON.parse(JSON.stringify(tpl.elements)),
           viewBoxWidth: tpl.viewBoxWidth,
           viewBoxHeight: tpl.viewBoxHeight,
@@ -841,7 +911,7 @@ export function CostingQuotationDrawingView({
       }
     }
     return resolved;
-  }, [record.drawing, record.drawingData]);
+  }, [record.drawing, record.drawingData, loadedTemplates]);
 
   if (!drawing) return null;
 
